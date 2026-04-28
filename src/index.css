@@ -636,8 +636,8 @@
     filter: blur(80px);
     opacity: 0.3;
   }
-  .d-b1 { width: 600px; height: 600px; background: var(--accent); top: -150px; left: -180px; opacity: 0.5; }
-  .d-b2 { width: 500px; height: 500px; background: var(--accent-secondary); bottom: -200px; right: -150px; opacity: 0.25; }
+  .d-b1 { width: 700px; height: 700px; background: #BDBBFF; top: -100px; left: -100px; opacity: 0.7; }
+  .d-b2 { width: 500px; height: 500px; background: #E8D4FF; bottom: -200px; right: -150px; opacity: 0.4; }
 
   /* Decor inside workshop */
   .workshop > * { position: relative; z-index: 1; }

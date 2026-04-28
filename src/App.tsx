@@ -9,7 +9,7 @@ declare global {
 
 // ----- Tweakable defaults -----
 const TWEAKS = /*EDITMODE-BEGIN*/{
-  "accent": "#E8623D",
+  "accent": "#BDBBFF",
   "paper": "#F4EFE6",
   "ink": "#1B1A17",
   "showSketch": true
