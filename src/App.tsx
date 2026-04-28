@@ -3,7 +3,7 @@ import { useTweaks } from "./TweaksPanel";
 
 // ----- Tweakable defaults -----
 const TWEAKS = /*EDITMODE-BEGIN*/{
-  "accent": "#E8623D",
+  "accent": "#8B85E0",
   "paper": "#F4EFE6",
   "ink": "#1B1A17",
   "showSketch": true
@@ -365,14 +365,6 @@ function Hero({ onStart }) {
             <span className="arrow-inline">→</span>
           </button>
           <span className="cta-aside">~3 minutes · no signup</span>
-        </div>
-
-        <div className="hero-ticker">
-          <div className="ticker-track">
-            {["• guided interview", "• polished by Claude", "• markdown out", "• drop into Claude.ai or Code", "• guided interview", "• polished by Claude", "• markdown out", "• drop into Claude.ai or Code"].map((t, i) => (
-              <span key={i}>{t}</span>
-            ))}
-          </div>
         </div>
       </div>
 
