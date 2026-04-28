@@ -343,14 +343,6 @@ function Hero({ onStart }) {
           </button>
           <span className="cta-aside">~3 minutes · no signup</span>
         </div>
-
-        <div className="hero-ticker">
-          <div className="ticker-track">
-            {["• guided interview", "• polished by Claude", "• markdown out", "• drop into Claude.ai or Code", "• guided interview", "• polished by Claude", "• markdown out", "• drop into Claude.ai or Code"].map((t, i) => (
-              <span key={i}>{t}</span>
-            ))}
-          </div>
-        </div>
       </div>
 
       <SkillCardSample />
