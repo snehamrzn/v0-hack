@@ -1,0 +1,67 @@
+import { createAnthropic } from "@ai-sdk/anthropic";
+import { streamText } from "ai";
+import { SKILL_CREATOR_PROMPT } from "./skill-creator-prompt";
+
+const SYSTEM_PROMPT = `${SKILL_CREATOR_PROMPT}
+
+---
+
+# Skillsmith integration notes
+
+You are embedded in a guided web interview ("Skillsmith") that walks a non-technical user through authoring a Claude skill one field at a time. Each request asks you to polish ONE field's draft.
+
+The user's request will tell you which field is being polished (one of: name, purpose, trigger, steps, gotchas, example) and include their current draft plus prior answers for context.
+
+Your job:
+- Keep the user's voice and intent. Don't invent details they didn't supply.
+- Apply the skill-creator guidance above to that one field.
+- For "trigger": be pushy — Claude under-triggers skills, so phrase as concrete moments and phrases that should activate it.
+- For "steps": output as numbered steps, one per line, imperative voice.
+- For "gotchas": output as a bullet list, one per line.
+- For "name": lowercase, hyphenated slug.
+- For "purpose": one tight sentence.
+
+Return ONLY the polished text for that field. No preamble, no markdown headers, no commentary.`;
+
+export default async function handler(req: Request): Promise<Response> {
+  if (req.method !== "POST") {
+    return new Response("Method not allowed", { status: 405 });
+  }
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return new Response(
+      JSON.stringify({ error: "ANTHROPIC_API_KEY not set on the server" }),
+      { status: 500, headers: { "content-type": "application/json" } }
+    );
+  }
+
+  let body: any;
+  try {
+    body = await req.json();
+  } catch {
+    return new Response(JSON.stringify({ error: "Invalid JSON" }), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  const messages = body?.messages;
+  if (!Array.isArray(messages)) {
+    return new Response(
+      JSON.stringify({ error: "Expected { messages: [...] }" }),
+      { status: 400, headers: { "content-type": "application/json" } }
+    );
+  }
+
+  const anthropic = createAnthropic({ apiKey });
+
+  const result = streamText({
+    model: anthropic("claude-sonnet-4-5"),
+    system: SYSTEM_PROMPT,
+    messages,
+    maxOutputTokens: 1024,
+  });
+
+  return result.toTextStreamResponse();
+}

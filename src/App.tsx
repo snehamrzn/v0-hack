@@ -1,12 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useTweaks } from "./TweaksPanel";
 
-declare global {
-  interface Window {
-    claude?: { complete: (args: any) => Promise<string> };
-  }
-}
-
 // ----- Tweakable defaults -----
 const TWEAKS = /*EDITMODE-BEGIN*/{
   "accent": "#E8623D",
@@ -200,28 +194,57 @@ export default function App() {
     setEnhancing(true);
     setEnhanceMsg("");
     try {
-      const ctx = INTERVIEW.slice(0, step).map(q => `${q.key}: ${answers[q.key] || ""}`).join("\n");
-      const sys = `You are helping someone author a Claude skill (an instruction file Claude loads to do specialized tasks).
-The user is at the "${current.key}" step. Their answer so far is below.
-Polish it: keep their voice, fix grammar, sharpen specifics, use imperative tense for steps.
-${current.key === "trigger" ? "Make it 'pushy' — Claude tends to under-use skills. Phrase as concrete moments/phrases." : ""}
-${current.key === "steps" ? "Output as numbered steps, one per line, imperative." : ""}
-${current.key === "gotchas" ? "Output as bullet list, one per line." : ""}
-Return ONLY the polished text. No preamble, no markdown headers.`;
-      if (!window.claude?.complete) throw new Error("claude.complete unavailable");
-      const text = await window.claude.complete({
-        messages: [
-          { role: "user", content: `Previous context:\n${ctx}\n\nCurrent step (${current.key}):\n${draft}\n\n${sys}` }
-        ]
+      const priorContext = INTERVIEW.slice(0, step)
+        .map(q => `${q.key}: ${answers[q.key] || "(skipped)"}`)
+        .join("\n");
+
+      const userMessage = `Field being polished: **${current.key}**
+
+Prior answers from this interview:
+${priorContext || "(none yet — this is the first field)"}
+
+Their current draft for "${current.key}":
+${draft}`;
+
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          messages: [{ role: "user", content: userMessage }],
+        }),
       });
-      if (text && text.trim()) {
-        setDraft(text.trim());
+
+      if (!res.ok || !res.body) {
+        const errText = await res.text().catch(() => "");
+        throw new Error(errText || `HTTP ${res.status}`);
+      }
+
+      // Stream the polished text back into the textarea as it arrives.
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let acc = "";
+      setDraft("");
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        acc += decoder.decode(value, { stream: true });
+        setDraft(acc);
+      }
+      acc += decoder.decode();
+      const finalText = acc.trim();
+      if (finalText) {
+        setDraft(finalText);
         setEnhanceMsg("polished ✶");
         setTimeout(() => setEnhanceMsg(""), 2000);
       }
-    } catch (e) {
-      setEnhanceMsg("couldn't reach the muse");
-      setTimeout(() => setEnhanceMsg(""), 2500);
+    } catch (e: any) {
+      console.error(e);
+      setEnhanceMsg(
+        e?.message?.includes("ANTHROPIC_API_KEY")
+          ? "set ANTHROPIC_API_KEY in .env.local"
+          : "couldn't reach the muse"
+      );
+      setTimeout(() => setEnhanceMsg(""), 3000);
     } finally {
       setEnhancing(false);
     }
@@ -451,10 +474,10 @@ function QuestionCard({ question, draft, setDraft, onNext, onSkip, onBack, onEnh
             className="enhance-btn"
             onClick={onEnhance}
             disabled={enhancing || !draft.trim()}
-            title="Polish with Claude"
+            title="Polish with SkillSmith"
           >
             <span className="enhance-glyph">✶</span>
-            {enhancing ? "polishing…" : "polish with claude"}
+            {enhancing ? "polishing…" : "polish with skillsmith"}
           </button>
           {enhanceMsg && <span className="enhance-msg">{enhanceMsg}</span>}
         </div>
