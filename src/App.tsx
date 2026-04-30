@@ -1,5 +1,19 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useTweaks } from "./TweaksPanel";
+import {
+  buildArtifacts,
+  describeTarget,
+  reloadHint,
+  replaceDescription,
+  type Target,
+  type Scope,
+} from "./skill-formats";
+import {
+  canSaveToFolder,
+  saveAsZip,
+  saveToDirectory,
+  type SaveResult,
+} from "./save-handlers";
 
 // ----- Tweakable defaults -----
 const TWEAKS = /*EDITMODE-BEGIN*/{
@@ -13,7 +27,7 @@ const TWEAKS = /*EDITMODE-BEGIN*/{
 const INTERVIEW = [
   {
     key: "name",
-    prompt: "First — what should we call this skill? A short, memorable name works best.",
+    prompt: "First - what should we call this skill? A short, memorable name works best.",
     placeholder: "e.g. Recipe Rescuer, Standup Notes, Brand Voice…",
     hint: "Lowercase, hyphens are fine. Think of it like a slash-command.",
   },
@@ -46,7 +60,7 @@ const INTERVIEW = [
   },
   {
     key: "example",
-    prompt: "Lastly — an example of input → output, if you have one. (Optional.)",
+    prompt: "Lastly - an example of input → output, if you have one. (Optional.)",
     placeholder: "Input: 'eng sync, sam shipped login, rae blocked on api'…\nOutput: 'This week the team…'",
     hint: "Even one rough example dramatically improves the skill.",
     multiline: true,
@@ -153,6 +167,30 @@ export default function App() {
   const synthFiredRef = useRef(false);
   const skillMd = synthesizedMd ?? templateMd;
 
+  // Stage 1 — web research before synthesis.
+  type ResearchSource = { n: number; url: string; title: string };
+  const [researchNotes, setResearchNotes] = useState<string | null>(null);
+  const [researching, setResearching] = useState(false);
+  const [researchError, setResearchError] = useState<string | null>(null);
+  const [researchSources, setResearchSources] = useState<ResearchSource[]>([]);
+  const researchFiredRef = useRef(false);
+
+  // Stage 3 — sharpen the description after synthesis.
+  type OptimizedDesc = { original: string; improved: string; changes: string };
+  const [optimizedDescription, setOptimizedDescription] = useState<OptimizedDesc | null>(null);
+  const [optimizing, setOptimizing] = useState(false);
+  const [optimizeError, setOptimizeError] = useState<string | null>(null);
+  const optimizeFiredRef = useRef(false);
+
+  // Stage 4 — self-test the trigger.
+  type TriggerTest = { request: string; should_fire: boolean; would_fire: boolean; reason: string };
+  const [triggerTests, setTriggerTests] = useState<TriggerTest[] | null>(null);
+  const [testingTrigger, setTestingTrigger] = useState(false);
+  const [triggerTestError, setTriggerTestError] = useState<string | null>(null);
+  const triggerFiredRef = useRef(false);
+
+  const pipelineActive = researching || synthesizing || optimizing || testingTrigger;
+
   useEffect(() => {
     if (started && inputRef.current) {
       inputRef.current.focus();
@@ -163,18 +201,100 @@ export default function App() {
     if (previewRef.current) previewRef.current.scrollTop = 0;
   }, [step]);
 
-  // When the interview finishes, ask the model to synthesize the final SKILL.md
-  // using the skill-creator system prompt. We use a ref guard so we only fire
-  // once per "interview completed" transition — putting `synthesizing` /
-  // `synthesizedMd` in the dep array would self-cancel the effect mid-stream.
+  // ---------------- Pipeline: research → synthesize → sharpen → stress-test
+  //
+  // Each stage is an independent useEffect with a ref-guard so React 18
+  // strict-mode double-invoke can't double-fire mid-stream. Stages chain via
+  // state nullability — e.g. synthesis only fires once `researchNotes` is set
+  // (success OR graceful skip). On `!isDone` we reset every stage's state so
+  // a fresh interview starts clean.
+
+  // Reset all stages when the interview rewinds.
   useEffect(() => {
-    if (!isDone) {
-      synthFiredRef.current = false;
-      setSynthesizedMd(null);
-      setSynthError(null);
-      return;
-    }
-    if (synthFiredRef.current) return;
+    if (isDone) return;
+    researchFiredRef.current = false;
+    synthFiredRef.current = false;
+    optimizeFiredRef.current = false;
+    triggerFiredRef.current = false;
+    setResearchNotes(null);
+    setResearchSources([]);
+    setResearchError(null);
+    setSynthesizedMd(null);
+    setSynthError(null);
+    setOptimizedDescription(null);
+    setOptimizeError(null);
+    setTriggerTests(null);
+    setTriggerTestError(null);
+  }, [isDone]);
+
+  // Stage 1 — research the skill's domain via the model's web_search tool.
+  useEffect(() => {
+    if (!isDone || researchFiredRef.current) return;
+    researchFiredRef.current = true;
+
+    (async () => {
+      setResearching(true);
+      setResearchError(null);
+      try {
+        const userMessage = `Mode: RESEARCH_TOPIC
+
+Research the user's skill domain on the web. Use the web_search tool 2–4 times with varied queries. Return the structured Findings / Pitfalls / Sources block — do NOT write the SKILL.md.
+
+name: ${answers.name || "(unnamed)"}
+purpose: ${answers.purpose || "(none)"}
+trigger: ${answers.trigger || "(none)"}`;
+
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            messages: [{ role: "user", content: userMessage }],
+          }),
+        });
+
+        if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let acc = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          acc += decoder.decode(value, { stream: true });
+        }
+        acc += decoder.decode();
+        const finalText = acc.trim();
+
+        if (finalText === "RESEARCH_UNAVAILABLE" || !finalText) {
+          setResearchError("research skipped — synthesizing without it");
+          setResearchNotes("");
+          return;
+        }
+
+        // Parse the `## Sources` block: lines like `[1] https://… — title`.
+        const sources: ResearchSource[] = [];
+        const sourcesBlock = finalText.split(/^##\s+Sources\s*$/m)[1] || "";
+        const re = /^\[(\d+)\]\s+(\S+)\s+—\s+(.+)$/gm;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(sourcesBlock)) !== null) {
+          sources.push({ n: Number(m[1]), url: m[2], title: m[3].trim() });
+        }
+        setResearchSources(sources);
+        setResearchNotes(finalText);
+      } catch (e: any) {
+        console.error("[research]", e);
+        setResearchError("research skipped — synthesizing without it");
+        // Unblock the chain even on failure.
+        setResearchNotes("");
+      } finally {
+        setResearching(false);
+      }
+    })();
+  }, [isDone]);
+
+  // Stage 2 — synthesize the SKILL.md, grounded in research notes if any.
+  useEffect(() => {
+    if (!isDone || researchNotes === null || synthFiredRef.current) return;
     synthFiredRef.current = true;
 
     (async () => {
@@ -189,7 +309,10 @@ export default function App() {
 
 Here are the user's interview answers. Produce the complete SKILL.md.
 
-${answersBlock}`;
+${answersBlock}
+
+research_notes:
+${researchNotes || "(unavailable)"}`;
 
         const res = await fetch("/api/chat", {
           method: "POST",
@@ -226,7 +349,206 @@ ${answersBlock}`;
         setSynthesizing(false);
       }
     })();
-  }, [isDone]);
+  }, [isDone, researchNotes]);
+
+  // Stage 3 — sharpen the `description:` line via OPTIMIZE_DESCRIPTION.
+  useEffect(() => {
+    if (
+      !isDone ||
+      synthesizedMd == null ||
+      synthesizing ||
+      optimizeFiredRef.current
+    )
+      return;
+    optimizeFiredRef.current = true;
+
+    (async () => {
+      setOptimizing(true);
+      setOptimizeError(null);
+      try {
+        const userMessage = `Mode: OPTIMIZE_DESCRIPTION
+
+Here is the freshly-synthesized SKILL.md. Rewrite its description: line per the rules and return JSON only.
+
+${synthesizedMd}`;
+
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            messages: [{ role: "user", content: userMessage }],
+          }),
+        });
+
+        if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let acc = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          acc += decoder.decode(value, { stream: true });
+        }
+        acc += decoder.decode();
+        const finalText = acc.trim();
+
+        if (finalText === "OPTIMIZE_UNAVAILABLE" || !finalText) {
+          throw new Error("optimize skipped");
+        }
+
+        const jsonMatch = finalText.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) throw new Error("no JSON in response");
+        const parsed = JSON.parse(jsonMatch[0]) as OptimizedDesc;
+        if (typeof parsed.improved !== "string" || typeof parsed.original !== "string") {
+          throw new Error("malformed JSON");
+        }
+
+        setOptimizedDescription(parsed);
+        if (parsed.improved && parsed.improved !== parsed.original) {
+          setSynthesizedMd(prev => (prev ? replaceDescription(prev, parsed.improved) : prev));
+        }
+      } catch (e: any) {
+        console.error("[optimize]", e);
+        setOptimizeError("couldn't sharpen trigger — keeping original");
+        // Set passthrough so the chain advances to trigger-test.
+        setOptimizedDescription({ original: "", improved: "", changes: "" });
+      } finally {
+        setOptimizing(false);
+      }
+    })();
+  }, [isDone, synthesizedMd, synthesizing]);
+
+  // Stage 4 — generate test cases and ask Claude (with a stripped-down system
+  // prompt) whether the description as written would actually fire the skill.
+  useEffect(() => {
+    if (
+      !isDone ||
+      optimizedDescription === null ||
+      synthesizedMd == null ||
+      triggerFiredRef.current
+    )
+      return;
+    triggerFiredRef.current = true;
+
+    (async () => {
+      setTestingTrigger(true);
+      setTriggerTestError(null);
+      try {
+        // Pull the current description (post-sharpen if applicable).
+        const descMatch = synthesizedMd.match(/^description:\s*(.*)$/m);
+        const description = descMatch?.[1]?.trim() || optimizedDescription.improved || optimizedDescription.original;
+        const nameMatch = synthesizedMd.match(/^name:\s*(.*)$/m);
+        const skillName = nameMatch?.[1]?.trim() || answers.name || "(unnamed)";
+
+        const userMessage = `Test this skill's trigger.
+
+name: ${skillName}
+description: ${description}
+
+Generate 3 plausible user requests where this skill should fire and 1 adjacent request where it should not. For each, judge whether the description as written would lead you to pick this skill. Return JSON only.`;
+
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            messages: [{ role: "user", content: `Mode: TEST_TRIGGER\n\n${userMessage}` }],
+          }),
+        });
+
+        if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let acc = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          acc += decoder.decode(value, { stream: true });
+        }
+        acc += decoder.decode();
+        const finalText = acc.trim();
+
+        if (finalText === "TRIGGER_TEST_UNAVAILABLE" || !finalText) {
+          throw new Error("trigger test skipped");
+        }
+
+        const jsonMatch = finalText.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) throw new Error("no JSON in response");
+        const parsed = JSON.parse(jsonMatch[0]) as { tests: TriggerTest[] };
+        if (!Array.isArray(parsed.tests)) throw new Error("malformed tests array");
+        setTriggerTests(parsed.tests);
+      } catch (e: any) {
+        console.error("[trigger-test]", e);
+        setTriggerTestError("trigger self-test unavailable");
+      } finally {
+        setTestingTrigger(false);
+      }
+    })();
+  }, [isDone, optimizedDescription, synthesizedMd]);
+
+  // Re-sharpen the description with the failing test cases as extra context.
+  // Doesn't auto-rerun the trigger test — the user clicks "stress-test again"
+  // (or just re-saves with the new description).
+  async function handleResharpen() {
+    if (!synthesizedMd || optimizing) return;
+    const failures = (triggerTests || [])
+      .filter(t => t.should_fire && !t.would_fire)
+      .map(t => `- "${t.request}" — ${t.reason}`)
+      .join("\n");
+    if (!failures) return;
+
+    setOptimizing(true);
+    setOptimizeError(null);
+    try {
+      const userMessage = `Mode: OPTIMIZE_DESCRIPTION
+
+The current description failed to trigger on these user requests. Rewrite the description: line so it would fire on these phrasings.
+
+failed_cases:
+${failures}
+
+Current SKILL.md:
+${synthesizedMd}`;
+
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          messages: [{ role: "user", content: userMessage }],
+        }),
+      });
+
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let acc = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        acc += decoder.decode(value, { stream: true });
+      }
+      acc += decoder.decode();
+      const finalText = acc.trim();
+
+      if (finalText === "OPTIMIZE_UNAVAILABLE" || !finalText) {
+        throw new Error("re-sharpen skipped");
+      }
+      const jsonMatch = finalText.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error("no JSON in response");
+      const parsed = JSON.parse(jsonMatch[0]) as OptimizedDesc;
+      setOptimizedDescription(parsed);
+      if (parsed.improved && parsed.improved !== parsed.original) {
+        setSynthesizedMd(prev => (prev ? replaceDescription(prev, parsed.improved) : prev));
+      }
+    } catch (e: any) {
+      console.error("[re-sharpen]", e);
+      setOptimizeError("re-sharpen failed");
+    } finally {
+      setOptimizing(false);
+    }
+  }
 
   function handleNext() {
     if (!current) return;
@@ -324,18 +646,15 @@ ${draft}`;
     }
   }
 
-  function handleDownload() {
-    const slug = (answers.name || "my-skill").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "my-skill";
-    const blob = new Blob([skillMd], { type: "text/markdown" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${slug}.SKILL.md`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }
+  const slug = useMemo(
+    () =>
+      (answers.name || "my-skill")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "") || "my-skill",
+    [answers.name],
+  );
 
   function handleCopy() {
     navigator.clipboard.writeText(skillMd);
@@ -390,13 +709,25 @@ ${draft}`;
 
             {isDone && (
               <DoneCard
-                onDownload={handleDownload}
+                skillMd={skillMd}
+                slug={slug}
                 onCopy={handleCopy}
                 onReset={handleReset}
                 msg={enhanceMsg}
                 name={answers.name}
                 synthesizing={synthesizing}
                 synthError={synthError}
+                researching={researching}
+                researchSources={researchSources}
+                researchError={researchError}
+                optimizing={optimizing}
+                optimizedDescription={optimizedDescription}
+                optimizeError={optimizeError}
+                testingTrigger={testingTrigger}
+                triggerTests={triggerTests}
+                triggerTestError={triggerTestError}
+                onResharpen={handleResharpen}
+                pipelineActive={pipelineActive}
               />
             )}
           </section>
@@ -406,7 +737,11 @@ ${draft}`;
               ref={previewRef}
               md={skillMd}
               answers={answers}
+              pipelineActive={pipelineActive}
+              researching={researching}
               synthesizing={synthesizing}
+              optimizing={optimizing}
+              testingTrigger={testingTrigger}
               synthError={synthError}
               isSynthesized={synthesizedMd !== null}
             />
@@ -573,29 +908,119 @@ function QuestionCard({ question, draft, setDraft, onNext, onSkip, onBack, onEnh
 }
 
 // ----- Done card -----
-function DoneCard({ onDownload, onCopy, onReset, msg, name, synthesizing, synthError }: any) {
+const TARGET_LABELS: Record<Target, string> = {
+  claude: "Claude Code",
+  cursor: "Cursor",
+  generic: "Generic .md",
+};
+
+function DoneCard({
+  skillMd,
+  slug,
+  onCopy,
+  onReset,
+  msg,
+  name,
+  synthesizing,
+  synthError,
+  researching,
+  researchSources,
+  researchError,
+  optimizing,
+  optimizedDescription,
+  optimizeError,
+  testingTrigger,
+  triggerTests,
+  triggerTestError,
+  onResharpen,
+  pipelineActive,
+}: any) {
+  const [target, setTarget] = useState<Target>("claude");
+  const [scope, setScope] = useState<Scope>("global");
+  const [saving, setSaving] = useState(false);
+  const [saveResult, setSaveResult] = useState<Extract<SaveResult, { kind: "saved" }> | null>(null);
+  const [saveError, setSaveError] = useState("");
+
+  const supportsScope = target === "claude";
+  const effectiveScope: Scope = supportsScope ? scope : "project";
+  const fsaSupported = canSaveToFolder();
+
+  const artifacts = useMemo(
+    () => buildArtifacts(skillMd, slug, target, effectiveScope),
+    [skillMd, slug, target, effectiveScope],
+  );
+
+  // Reset confirmation when the user changes target/scope after a save.
+  useEffect(() => {
+    setSaveResult(null);
+    setSaveError("");
+  }, [target, scope]);
+
+  async function handleSave() {
+    setSaving(true);
+    setSaveError("");
+    const result = await saveToDirectory(artifacts.entries);
+    setSaving(false);
+    if (result.kind === "saved") {
+      setSaveResult(result);
+    } else if (result.kind === "error") {
+      setSaveError(`couldn't write — ${result.message}. try Download .zip`);
+    }
+  }
+
+  async function handleZip() {
+    setSaveError("");
+    try {
+      await saveAsZip(artifacts.entries, artifacts.zipName);
+    } catch (e: any) {
+      setSaveError(e?.message || "couldn't build zip");
+    }
+  }
+
   return (
     <div className="qcard done-card">
       <div className="done-stamp">
         <Star size={42} />
       </div>
       <h2 className="question">
-        {synthesizing ? "Forging your skill…" : "Your skill is forged."}
+        {researching
+          ? "Studying the craft…"
+          : synthesizing
+          ? "Forging your skill…"
+          : optimizing
+          ? "Sharpening the trigger…"
+          : testingTrigger
+          ? "Stress-testing…"
+          : "Your skill is forged."}
       </h2>
-      <p className="qhint" style={{ marginBottom: 24 }}>
-        {synthesizing ? (
+      <p className="qhint" style={{ marginBottom: 20 }}>
+        {researching ? (
+          <>The skill-creator is browsing the web for best practices in your domain.</>
+        ) : synthesizing ? (
           <>
             The skill-creator is rewriting your answers into a polished{" "}
             <code>SKILL.md</code> — watch it stream into the preview.
           </>
+        ) : optimizing ? (
+          <>Tightening the description so your agent will actually fire this skill.</>
+        ) : testingTrigger ? (
+          <>Asking the model whether it would invoke this skill in plausible scenarios.</>
         ) : (
           <>
-            Take <em>{name || "your skill"}</em> home as a Markdown file. Drop
-            it into <code>~/.claude/skills/</code> or upload to Claude.ai.
+            Take <em>{name || "your skill"}</em> home — pick where it should
+            land and we'll create the right folder structure for you.
           </>
         )}
       </p>
 
+      {researching && (
+        <div className="synth-loader research-loader" aria-live="polite">
+          <span className="synth-dot" />
+          <span className="synth-dot" />
+          <span className="synth-dot" />
+          <span className="synth-label">researching best practices</span>
+        </div>
+      )}
       {synthesizing && (
         <div className="synth-loader" aria-live="polite">
           <span className="synth-dot" />
@@ -604,20 +1029,113 @@ function DoneCard({ onDownload, onCopy, onReset, msg, name, synthesizing, synthE
           <span className="synth-label">synthesizing with skill-creator</span>
         </div>
       )}
+      {optimizing && (
+        <div className="synth-loader optimize-loader" aria-live="polite">
+          <span className="synth-dot" />
+          <span className="synth-dot" />
+          <span className="synth-dot" />
+          <span className="synth-label">sharpening the trigger</span>
+        </div>
+      )}
+      {testingTrigger && (
+        <div className="synth-loader test-loader" aria-live="polite">
+          <span className="synth-dot" />
+          <span className="synth-dot" />
+          <span className="synth-dot" />
+          <span className="synth-label">stress-testing the trigger</span>
+        </div>
+      )}
 
-      <div className="done-actions" style={{ opacity: synthesizing ? 0.5 : 1 }}>
+      {!pipelineActive && (
+        <SkillQualityRow
+          researchSources={researchSources}
+          researchError={researchError}
+          optimizedDescription={optimizedDescription}
+          optimizeError={optimizeError}
+          triggerTests={triggerTests}
+          triggerTestError={triggerTestError}
+          onResharpen={onResharpen}
+        />
+      )}
+
+      {!pipelineActive && (
+        <div className="install-picker" aria-label="install target">
+          <div className="picker-row">
+            <span className="picker-label">for</span>
+            <div className="seg" role="tablist">
+              {(Object.keys(TARGET_LABELS) as Target[]).map(t => (
+                <button
+                  key={t}
+                  role="tab"
+                  aria-selected={target === t}
+                  className={`seg-btn ${target === t ? "is-active" : ""}`}
+                  onClick={() => setTarget(t)}
+                  type="button"
+                >
+                  {TARGET_LABELS[t]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {supportsScope && (
+            <div className="picker-row">
+              <span className="picker-label">scope</span>
+              <div className="seg seg-sm" role="tablist">
+                <button
+                  role="tab"
+                  aria-selected={scope === "global"}
+                  className={`seg-btn ${scope === "global" ? "is-active" : ""}`}
+                  onClick={() => setScope("global")}
+                  type="button"
+                  title="installs into ~/.claude/skills/ — available everywhere"
+                >
+                  global
+                </button>
+                <button
+                  role="tab"
+                  aria-selected={scope === "project"}
+                  className={`seg-btn ${scope === "project" ? "is-active" : ""}`}
+                  onClick={() => setScope("project")}
+                  type="button"
+                  title="installs into .claude/skills/ in this repo only"
+                >
+                  project
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="path-preview">
+            <span className="path-hint">{describeTarget(target, effectiveScope)}</span>
+            <code className="path-line">{artifacts.pathHint}</code>
+          </div>
+        </div>
+      )}
+
+      <div className="done-actions" style={{ opacity: pipelineActive ? 0.5 : 1 }}>
+        {fsaSupported && (
+          <button
+            className="primary-btn big"
+            onClick={handleSave}
+            disabled={pipelineActive || saving}
+            title={pipelineActive ? "wait for the pipeline to finish" : "pick a folder; we write the structure"}
+          >
+            {saving ? "saving…" : "↓ save to folder…"}
+          </button>
+        )}
         <button
-          className="primary-btn big"
-          onClick={onDownload}
-          disabled={synthesizing}
-          title={synthesizing ? "wait for synthesis to finish" : ""}
+          className={fsaSupported ? "ghost-btn" : "primary-btn big"}
+          onClick={handleZip}
+          disabled={pipelineActive}
+          title="download a zip with the right folder layout"
         >
-          ↓ download SKILL.md
+          {fsaSupported ? "download .zip" : "↓ download .zip"}
         </button>
         <button
           className="ghost-btn"
           onClick={onCopy}
-          disabled={synthesizing}
+          disabled={pipelineActive}
         >
           copy text
         </button>
@@ -627,33 +1145,249 @@ function DoneCard({ onDownload, onCopy, onReset, msg, name, synthesizing, synthE
       {synthError && (
         <div className="enhance-msg" style={{ marginTop: 14 }}>{synthError}</div>
       )}
-      {msg && !synthError && (
+      {saveError && (
+        <div className="enhance-msg" style={{ marginTop: 14 }}>{saveError}</div>
+      )}
+      {msg && !synthError && !saveError && (
         <div className="enhance-msg" style={{ marginTop: 14 }}>{msg}</div>
       )}
 
-      <div className="next-steps">
-        <h4>what to do next</h4>
+      {saveResult ? (
+        <div className="next-steps next-steps-saved">
+          <h4>saved ✶</h4>
+          <p style={{ margin: "0 0 6px" }}>
+            Wrote into <code>{saveResult.rootName}</code>:
+          </p>
+          <ul style={{ margin: "0 0 10px", paddingLeft: 22 }}>
+            {saveResult.paths.map(p => (
+              <li key={p}><code>{p}</code></li>
+            ))}
+          </ul>
+          <p style={{ margin: 0 }}>{reloadHint(target)}</p>
+        </div>
+      ) : (
+        <div className="next-steps">
+          <h4>what to do next</h4>
+          <NextStepsList target={target} scope={effectiveScope} fsaSupported={fsaSupported} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NextStepsList({ target, scope, fsaSupported }: { target: Target; scope: Scope; fsaSupported: boolean }) {
+  if (target === "claude") {
+    if (fsaSupported) {
+      return (
         <ol>
-          <li>Save the file as <code>SKILL.md</code> in a folder named after your skill.</li>
-          <li>Move that folder into <code>~/.claude/skills/</code> (Claude Code) or upload to claude.ai.</li>
-          <li>Start a new chat and watch your agent pick it up automatically.</li>
+          <li>
+            Click <strong>save to folder…</strong> and pick{" "}
+            {scope === "global" ? (
+              <>your <code>~</code> (home) folder</>
+            ) : (
+              <>your project root</>
+            )}.
+          </li>
+          <li>
+            We'll create <code>.claude/skills/&lt;name&gt;/SKILL.md</code> for you.
+          </li>
+          <li>{reloadHint("claude")}</li>
         </ol>
-      </div>
+      );
+    }
+    return (
+      <ol>
+        <li>Click <strong>download .zip</strong>.</li>
+        <li>
+          Unzip into{" "}
+          {scope === "global" ? (
+            <>your home folder — it contains <code>.claude/skills/&lt;name&gt;/</code></>
+          ) : (
+            <>your project root — it contains <code>.claude/skills/&lt;name&gt;/</code></>
+          )}.
+        </li>
+        <li>{reloadHint("claude")}</li>
+      </ol>
+    );
+  }
+  if (target === "cursor") {
+    if (fsaSupported) {
+      return (
+        <ol>
+          <li>Click <strong>save to folder…</strong> and pick your project root.</li>
+          <li>We'll create <code>.cursor/rules/&lt;name&gt;.mdc</code> with the right frontmatter.</li>
+          <li>{reloadHint("cursor")}</li>
+        </ol>
+      );
+    }
+    return (
+      <ol>
+        <li>Click <strong>download .zip</strong>.</li>
+        <li>Unzip into your project root — the file lands at <code>.cursor/rules/&lt;name&gt;.mdc</code>.</li>
+        <li>{reloadHint("cursor")}</li>
+      </ol>
+    );
+  }
+  return (
+    <ol>
+      <li>{fsaSupported ? "Save or download the .md file." : "Download the .md file."}</li>
+      <li>Drop it wherever your agent reads instructions from.</li>
+    </ol>
+  );
+}
+
+// ----- Skill quality row (sources + sharpened pill + trigger test) -----
+function SkillQualityRow({
+  researchSources,
+  researchError,
+  optimizedDescription,
+  optimizeError,
+  triggerTests,
+  triggerTestError,
+  onResharpen,
+}: any) {
+  const hasSources = Array.isArray(researchSources) && researchSources.length > 0;
+  const sharpened =
+    optimizedDescription &&
+    optimizedDescription.improved &&
+    optimizedDescription.original &&
+    optimizedDescription.improved !== optimizedDescription.original;
+  const hasTests = Array.isArray(triggerTests) && triggerTests.length > 0;
+
+  if (!hasSources && !sharpened && !hasTests && !researchError && !optimizeError && !triggerTestError) {
+    return null;
+  }
+
+  const passed = hasTests
+    ? triggerTests!.filter((t: any) => t.should_fire === t.would_fire).length
+    : 0;
+  const total = hasTests ? triggerTests!.length : 0;
+  const failingShouldFire = hasTests
+    ? triggerTests!.filter((t: any) => t.should_fire && !t.would_fire)
+    : [];
+
+  function hostnameFor(url: string): string {
+    try {
+      return new URL(url).hostname.replace(/^www\./, "");
+    } catch {
+      return url;
+    }
+  }
+
+  return (
+    <div className="skill-quality">
+      {hasSources && (
+        <div className="skill-sources">
+          <details>
+            <summary>
+              <span className="quality-pill">✶ grounded in {researchSources.length} source{researchSources.length === 1 ? "" : "s"}</span>
+            </summary>
+            <ul>
+              {researchSources.map((s: any) => (
+                <li key={s.n}>
+                  <span className="src-num">[{s.n}]</span>
+                  <a href={s.url} target="_blank" rel="noreferrer">{hostnameFor(s.url)}</a>
+                  <span className="src-title"> — {s.title}</span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        </div>
+      )}
+
+      {researchError && !hasSources && (
+        <div className="quality-note">{researchError}</div>
+      )}
+
+      {sharpened && (
+        <div className="trigger-sharpened">
+          <details>
+            <summary>
+              <span className="quality-pill quality-pill-accent">✶ trigger sharpened</span>
+            </summary>
+            <div className="sharpen-diff">
+              <div className="sharpen-row">
+                <span className="sharpen-label">before</span>
+                <code>{optimizedDescription.original}</code>
+              </div>
+              <div className="sharpen-row">
+                <span className="sharpen-label">after</span>
+                <code>{optimizedDescription.improved}</code>
+              </div>
+              {optimizedDescription.changes && (
+                <p className="sharpen-rationale">{optimizedDescription.changes}</p>
+              )}
+            </div>
+          </details>
+        </div>
+      )}
+
+      {optimizeError && (
+        <div className="quality-note">{optimizeError}</div>
+      )}
+
+      {hasTests && (
+        <div className="trigger-test">
+          <div className="trigger-test-head">
+            <span className={`quality-pill ${passed === total ? "quality-pill-good" : "quality-pill-warn"}`}>
+              Trigger test: {passed}/{total} passed
+            </span>
+            {failingShouldFire.length > 0 && (
+              <button
+                type="button"
+                className="link-btn re-sharpen-btn"
+                onClick={onResharpen}
+              >
+                re-sharpen trigger →
+              </button>
+            )}
+          </div>
+          <ul className="trigger-test-list">
+            {triggerTests!.map((t: any, i: number) => {
+              const ok = t.should_fire === t.would_fire;
+              return (
+                <li key={i} className={`trigger-row ${ok ? "ok" : "fail"}`}>
+                  <span className="trigger-mark">{ok ? "✓" : "✗"}</span>
+                  <details>
+                    <summary>
+                      <span className="trigger-request">{t.request}</span>
+                      <span className="trigger-expected">
+                        {t.should_fire ? "should fire" : "should not fire"}
+                      </span>
+                    </summary>
+                    <p className="trigger-reason">{t.reason}</p>
+                  </details>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      {triggerTestError && !hasTests && (
+        <div className="quality-note">{triggerTestError}</div>
+      )}
     </div>
   );
 }
 
 // ----- Preview pane -----
-const PreviewPane = React.forwardRef<any, any>(({ md, answers, synthesizing, synthError, isSynthesized }, ref) => {
-  const status = synthesizing
+const PreviewPane = React.forwardRef<any, any>(({ md, answers, pipelineActive, researching, synthesizing, optimizing, testingTrigger, synthError, isSynthesized }, ref) => {
+  const status = researching
+    ? "researching best practices…"
+    : synthesizing
     ? "synthesizing with skill-creator…"
+    : optimizing
+    ? "sharpening the trigger…"
+    : testingTrigger
+    ? "stress-testing the trigger…"
     : synthError
     ? synthError
     : isSynthesized
     ? "synthesized ✶"
     : "live preview";
   return (
-    <div className={`preview ${synthesizing ? "is-synthesizing" : ""}`} ref={ref}>
+    <div className={`preview ${pipelineActive ? "is-synthesizing" : ""}`} ref={ref}>
       <div className="preview-chrome">
         <span className="dot d1" />
         <span className="dot d2" />
