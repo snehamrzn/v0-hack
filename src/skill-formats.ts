@@ -66,9 +66,15 @@ export function buildArtifacts(
     // Always nest under .claude/skills/<slug>/ so the user can pick their home
     // folder (global) or project root (project) and the layout is correct.
     const path = `.claude/skills/${slug}/SKILL.md`;
+    // For global scope we hide the folder picker (the user would have to
+    // navigate to ~ which is hidden by default in macOS Finder); the .zip is
+    // the canonical install path, so show the absolute home-relative location.
+    const pathHint = scope === "global"
+      ? `~/${path}`
+      : `<picked-folder>/${path}`;
     return {
       entries: [{ path, content: skillMd }],
-      pathHint: `<picked-folder>/${path}`,
+      pathHint,
       zipName: `${slug}-claude-${scope}.zip`,
     };
   }
@@ -94,12 +100,66 @@ export function buildArtifacts(
 // Hint shown above the action row before the user clicks save.
 export function describeTarget(target: Target, scope: Scope): string {
   if (target === "claude" && scope === "global")
-    return "Pick your home folder (~) — we'll create .claude/skills/<name>/.";
+    return "Download the .zip and unzip into your home folder. Files land at ~/.claude/skills/<name>/.";
   if (target === "claude" && scope === "project")
     return "Pick your project root — we'll create .claude/skills/<name>/.";
   if (target === "cursor")
     return "Pick your project root — we'll create .cursor/rules/<name>.mdc.";
   return "Pick any folder — we'll drop a single .md file there.";
+}
+
+// Share the skill server-side and get back a short ID. The CLI fetches the
+// content by ID at install time, so the npx command stays one-word short.
+// Storage TTL is 90 days; users can re-share by re-clicking copy.
+//
+// The JSON body sent to /api/share is a self-describing skill record — the
+// CLI receives it back via /api/skill?id=… and writes the file.
+export async function shareSkill(
+  skillMd: string,
+  slug: string,
+  target: Target,
+  scope: Scope,
+): Promise<string> {
+  // Reuse buildArtifacts so Cursor users get .mdc-formatted content stored,
+  // not raw SKILL.md.
+  const artifacts = buildArtifacts(skillMd, slug, target, scope);
+  const content = artifacts.entries[0]?.content ?? skillMd;
+  const record = JSON.stringify({ v: 1, target, scope, slug, content });
+
+  const res = await fetch("/api/share", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ content: record }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`share failed: ${res.status} ${text}`);
+  }
+  const { id } = await res.json();
+  if (typeof id !== "string") throw new Error("share returned invalid id");
+  return id;
+}
+
+// One-line npx command the user pastes into any terminal. The CLI hardcodes
+// the production server URL; if the web app is running on a different origin
+// (dev / staging / a fork's deploy), append --server so the CLI fetches from
+// the right place.
+const PROD_SERVER = "https://skillsmith.vercel.app";
+export function buildNpxCommand(id: string, origin?: string): string {
+  const base = `npx -y skillsmith-install@latest ${id}`;
+  if (!origin || origin === PROD_SERVER) return base;
+  return `${base} --server=${origin}`;
+}
+
+// Hint shown above the npx command — tells the user where it'll write.
+export function terminalHint(target: Target, scope: Scope): string {
+  if (target === "claude" && scope === "global")
+    return "Paste in any terminal — installs to ~/.claude/skills/<name>/.";
+  if (target === "claude" && scope === "project")
+    return "Run from your project root — installs to .claude/skills/<name>/.";
+  if (target === "cursor")
+    return "Run from your project root — installs to .cursor/rules/<name>.mdc.";
+  return "Run from any folder — drops a single .md file there.";
 }
 
 // Agent-specific reload step shown after a successful save.

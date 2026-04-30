@@ -23,9 +23,9 @@ Each field has a "polish with skillsmith" button that rewrites your draft in the
 
 ## What happens after the last question
 
-Four stages, each one a separate call to `/api/chat`:
+First, a find-or-build check. Skillsmith queries its own Skill Registry MCP server (`/api/mcp`) which proxies GitHub Code Search for `filename:SKILL.md` matches. If a public skill already covers your topic, you can install it in one click instead of authoring a new one — the file is fetched from GitHub raw and dropped into the standard save flow. If nothing matches (or you click "write fresh"), the four-stage pipeline kicks in:
 
-1. Research. Claude runs 2 to 4 web searches on the skill's domain so the synthesis can ground itself in real practice instead of guessing. Sources show up in the right-hand panel.
+1. Research. Claude calls `search_skills` (via the MCP server) to find related prior art, then runs 2 to 4 web searches on the skill's domain so the synthesis can ground itself in real practice instead of guessing. Sources show up in the right-hand panel.
 2. Synthesize. Your answers plus the research notes go in, a complete `SKILL.md` comes out and streams into the preview.
 3. Sharpen the description. The frontmatter `description:` line gets rewritten to be more aggressive about triggering. Agents under-trigger on vague descriptions, so this stage names concrete phrases the user might say.
 4. Stress-test the trigger. Claude generates fake user requests and checks whether the description would fire on the right ones and stay quiet on the rest. If something fails, you can rerun stage 3 with the failures fed back in.
@@ -48,15 +48,17 @@ If your browser supports the File System Access API (Chrome, Edge, the Chromium 
 npm install
 cp .env.example .env.local
 # put your ANTHROPIC_API_KEY in .env.local
+# (optional) GITHUB_TOKEN for higher rate limits on the registry MCP
 npm run dev
 ```
 
-The key is read server-side by `/api/chat`. It never reaches the browser.
+Both keys are read server-side. They never reach the browser.
 
 ## Stack
 
 - React 18 and Vite
 - Vercel AI SDK with the Anthropic provider
+- `mcp-handler` + `zod` for the in-repo Skill Registry MCP server
 - JSZip for the fallback download
 
 ## Layout
@@ -64,10 +66,15 @@ The key is read server-side by `/api/chat`. It never reaches the browser.
 ```
 api/chat.ts                   serverless endpoint, wires the system prompt to streamText
 api/skill-creator-prompt.ts   the prompt itself, with mode markers
-src/App.tsx                   UI + the four-stage pipeline
+api/mcp/[transport].ts        Skill Registry MCP server — exposes search_skills via GitHub
+src/App.tsx                   UI + find-or-build + the four-stage pipeline
 src/skill-formats.ts          turns one SKILL.md into per-target files
 src/save-handlers.ts          File System Access API and the zip fallback
 src/skill-creator-system.md   reference copy of the prompt
 ```
 
-The pipeline lives in `App.tsx` as four `useEffect` blocks chained on state nullability. Each one has a ref guard so React strict-mode double-invokes can't double-fire.
+The pipeline lives in `App.tsx` as five `useEffect` blocks chained on state nullability. Stage 0 (registry search) gates everything below it on `userChoice`; the install path skips stages 1–4 entirely. Each one has a ref guard so React strict-mode double-invokes can't double-fire.
+
+## The MCP server
+
+`api/mcp/[transport].ts` is a standalone MCP server other agents can install. Connect any MCP-capable client to `https://<your-deployment>/api/mcp/mcp` (HTTP transport) and you'll get the `search_skills` tool — a thin proxy over GitHub Code Search for `filename:SKILL.md` matches, deduped by repo.

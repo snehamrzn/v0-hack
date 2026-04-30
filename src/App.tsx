@@ -2,9 +2,12 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useTweaks } from "./TweaksPanel";
 import {
   buildArtifacts,
+  buildNpxCommand,
   describeTarget,
   reloadHint,
   replaceDescription,
+  shareSkill,
+  terminalHint,
   type Target,
   type Scope,
 } from "./skill-formats";
@@ -189,7 +192,19 @@ export default function App() {
   const [triggerTestError, setTriggerTestError] = useState<string | null>(null);
   const triggerFiredRef = useRef(false);
 
-  const pipelineActive = researching || synthesizing || optimizing || testingTrigger;
+  // Stage 0 — find-or-build. Before research fires, query the Skill Registry MCP
+  // for prior-art SKILL.md files. If hits, user picks one to install OR opts to
+  // write fresh; if no hits, we auto-advance to the existing pipeline.
+  type SkillHit = { name: string; repo: string; url: string; description: string };
+  const [registryHits, setRegistryHits] = useState<SkillHit[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [userChoice, setUserChoice] = useState<"install" | "write-fresh" | null>(null);
+  const [installing, setInstalling] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
+  const searchFiredRef = useRef(false);
+
+  const pipelineActive = searching || installing || researching || synthesizing || optimizing || testingTrigger;
 
   useEffect(() => {
     if (started && inputRef.current) {
@@ -212,10 +227,15 @@ export default function App() {
   // Reset all stages when the interview rewinds.
   useEffect(() => {
     if (isDone) return;
+    searchFiredRef.current = false;
     researchFiredRef.current = false;
     synthFiredRef.current = false;
     optimizeFiredRef.current = false;
     triggerFiredRef.current = false;
+    setRegistryHits(null);
+    setSearchError(null);
+    setUserChoice(null);
+    setInstallError(null);
     setResearchNotes(null);
     setResearchSources([]);
     setResearchError(null);
@@ -227,9 +247,112 @@ export default function App() {
     setTriggerTestError(null);
   }, [isDone]);
 
-  // Stage 1 — research the skill's domain via the model's web_search tool.
+  // Stage 0 — query the Skill Registry MCP for existing prior-art skills.
+  // Fires immediately when the interview ends. If no hits, auto-advances to
+  // write-fresh so the existing pipeline kicks in without a UI interruption.
   useEffect(() => {
-    if (!isDone || researchFiredRef.current) return;
+    if (!isDone || searchFiredRef.current) return;
+    searchFiredRef.current = true;
+
+    (async () => {
+      setSearching(true);
+      setSearchError(null);
+      try {
+        const query = `${answers.purpose || ""} ${answers.name || ""}`.trim() || answers.name || "";
+        if (!query) {
+          setRegistryHits([]);
+          setUserChoice("write-fresh");
+          return;
+        }
+
+        const userMessage = `Mode: SEARCH_REGISTRY\n\nquery: ${query}`;
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            messages: [{ role: "user", content: userMessage }],
+          }),
+        });
+
+        if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let acc = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          acc += decoder.decode(value, { stream: true });
+        }
+        acc += decoder.decode();
+
+        // Pull the JSON object out — the model may include surrounding text
+        // depending on how strictly it follows the system prompt.
+        const jsonMatch = acc.match(/\{[\s\S]*\}/);
+        const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { hits: [] };
+        const hits: SkillHit[] = Array.isArray(parsed.hits) ? parsed.hits : [];
+
+        setRegistryHits(hits);
+        if (hits.length === 0) {
+          // No prior art — flow straight to the write-fresh pipeline.
+          setUserChoice("write-fresh");
+        }
+      } catch (e: any) {
+        console.error("[search-registry]", e);
+        setSearchError("registry unavailable — writing fresh");
+        setRegistryHits([]);
+        setUserChoice("write-fresh");
+      } finally {
+        setSearching(false);
+      }
+    })();
+  }, [isDone]);
+
+  // Convert a github.com SKILL.md URL into its raw.githubusercontent.com
+  // counterpart so we can fetch the file content directly.
+  function toRawUrl(githubUrl: string): string {
+    return githubUrl
+      .replace("https://github.com/", "https://raw.githubusercontent.com/")
+      .replace("/blob/", "/");
+  }
+
+  // Install path — fetch the chosen skill's SKILL.md from GitHub and use it
+  // verbatim, skipping the synth/sharpen/test pipeline entirely.
+  async function handleInstall(hit: SkillHit) {
+    if (installing) return;
+    setInstalling(true);
+    setInstallError(null);
+    try {
+      const raw = await fetch(toRawUrl(hit.url));
+      if (!raw.ok) throw new Error(`couldn't fetch SKILL.md (${raw.status})`);
+      const md = await raw.text();
+      if (!md.trim()) throw new Error("SKILL.md was empty");
+
+      // Override the user's typed name with the installed skill's actual name
+      // so the slug + DoneCard hints reflect what they're installing.
+      const nameMatch = md.match(/^name:\s*(.*)$/m);
+      if (nameMatch?.[1]) {
+        setAnswers((a: any) => ({ ...a, name: nameMatch[1].trim() }));
+      }
+
+      setSynthesizedMd(md.trim());
+      setUserChoice("install");
+    } catch (e: any) {
+      console.error("[install]", e);
+      setInstallError(e?.message ?? "install failed");
+    } finally {
+      setInstalling(false);
+    }
+  }
+
+  function handleWriteFresh() {
+    setUserChoice("write-fresh");
+  }
+
+  // Stage 1 — research the skill's domain via the model's web_search tool.
+  // Gated on `userChoice === 'write-fresh'` so the install path skips it.
+  useEffect(() => {
+    if (!isDone || userChoice !== "write-fresh" || researchFiredRef.current) return;
     researchFiredRef.current = true;
 
     (async () => {
@@ -290,11 +413,12 @@ trigger: ${answers.trigger || "(none)"}`;
         setResearching(false);
       }
     })();
-  }, [isDone]);
+  }, [isDone, userChoice]);
 
   // Stage 2 — synthesize the SKILL.md, grounded in research notes if any.
+  // Skip entirely on the install path — the SKILL.md was fetched verbatim.
   useEffect(() => {
-    if (!isDone || researchNotes === null || synthFiredRef.current) return;
+    if (!isDone || userChoice !== "write-fresh" || researchNotes === null || synthFiredRef.current) return;
     synthFiredRef.current = true;
 
     (async () => {
@@ -349,12 +473,14 @@ ${researchNotes || "(unavailable)"}`;
         setSynthesizing(false);
       }
     })();
-  }, [isDone, researchNotes]);
+  }, [isDone, userChoice, researchNotes]);
 
   // Stage 3 — sharpen the `description:` line via OPTIMIZE_DESCRIPTION.
+  // Skip on the install path — installed skills keep their authors' descriptions.
   useEffect(() => {
     if (
       !isDone ||
+      userChoice !== "write-fresh" ||
       synthesizedMd == null ||
       synthesizing ||
       optimizeFiredRef.current
@@ -417,13 +543,15 @@ ${synthesizedMd}`;
         setOptimizing(false);
       }
     })();
-  }, [isDone, synthesizedMd, synthesizing]);
+  }, [isDone, userChoice, synthesizedMd, synthesizing]);
 
   // Stage 4 — generate test cases and ask Claude (with a stripped-down system
   // prompt) whether the description as written would actually fire the skill.
+  // Skip on the install path.
   useEffect(() => {
     if (
       !isDone ||
+      userChoice !== "write-fresh" ||
       optimizedDescription === null ||
       synthesizedMd == null ||
       triggerFiredRef.current
@@ -485,7 +613,7 @@ Generate 3 plausible user requests where this skill should fire and 1 adjacent r
         setTestingTrigger(false);
       }
     })();
-  }, [isDone, optimizedDescription, synthesizedMd]);
+  }, [isDone, userChoice, optimizedDescription, synthesizedMd]);
 
   // Re-sharpen the description with the failing test cases as extra context.
   // Doesn't auto-rerun the trigger test — the user clicks "stress-test again"
@@ -707,7 +835,19 @@ ${draft}`;
               />
             )}
 
-            {isDone && (
+            {isDone && userChoice === null && (
+              <FindOrBuildCard
+                searching={searching}
+                searchError={searchError}
+                hits={registryHits}
+                onInstall={handleInstall}
+                onWriteFresh={handleWriteFresh}
+                installing={installing}
+                installError={installError}
+              />
+            )}
+
+            {isDone && userChoice !== null && (
               <DoneCard
                 skillMd={skillMd}
                 slug={slug}
@@ -728,6 +868,7 @@ ${draft}`;
                 triggerTestError={triggerTestError}
                 onResharpen={handleResharpen}
                 pipelineActive={pipelineActive}
+                installedFromRegistry={userChoice === "install"}
               />
             )}
           </section>
@@ -907,6 +1048,114 @@ function QuestionCard({ question, draft, setDraft, onNext, onSkip, onBack, onEnh
   );
 }
 
+// ----- Find-or-build card -----
+//
+// Renders between the interview and the DoneCard when the Skill Registry MCP
+// returns prior-art hits. The user can install one (skipping the synth
+// pipeline entirely) or write fresh (existing pipeline kicks in).
+function FindOrBuildCard({
+  searching,
+  searchError,
+  hits,
+  onInstall,
+  onWriteFresh,
+  installing,
+  installError,
+}: {
+  searching: boolean;
+  searchError: string | null;
+  hits: { name: string; repo: string; url: string; description: string }[] | null;
+  onInstall: (hit: { name: string; repo: string; url: string; description: string }) => void;
+  onWriteFresh: () => void;
+  installing: boolean;
+  installError: string | null;
+}) {
+  if (searching || hits === null) {
+    return (
+      <div className="qcard">
+        <div className="qhead">
+          <span className="qkey">checking the registry</span>
+        </div>
+        <h2 className="question">
+          Looking for skills that already do this…
+        </h2>
+        <p className="qhint">
+          Searching public agent skills via the Skill Registry MCP server. If
+          someone's already shipped this, we'll show it — no point in writing it twice.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="qcard">
+      <div className="qhead">
+        <span className="qkey">we found {hits.length} existing skill{hits.length === 1 ? "" : "s"}</span>
+      </div>
+      <h2 className="question">
+        Install one — or write fresh.
+      </h2>
+      <p className="qhint">
+        These already exist in the public agent-skills ecosystem. Installing
+        copies the file directly. Writing fresh runs the full research +
+        synthesis pipeline.
+      </p>
+
+      <div className="hit-list">
+        {hits.map((hit) => (
+          <div key={hit.url} className="hit-card">
+            <div className="hit-head">
+              <span className="hit-name">{hit.name}</span>
+              <a className="hit-repo" href={hit.url} target="_blank" rel="noreferrer">
+                {hit.repo} ↗
+              </a>
+            </div>
+            {hit.description && (
+              <p className="hit-desc">{hit.description}</p>
+            )}
+            <div className="hit-actions">
+              <button
+                className="primary-btn"
+                onClick={() => onInstall(hit)}
+                disabled={installing}
+              >
+                {installing ? "installing…" : "install this"}
+                <span className="arrow-inline">→</span>
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {installError && (
+        <p className="enhance-msg" style={{ color: "#b00", marginTop: 12 }}>
+          {installError}
+        </p>
+      )}
+      {searchError && (
+        <p className="qhint" style={{ marginTop: 12, opacity: 0.7 }}>
+          {searchError}
+        </p>
+      )}
+
+      <div className="qactions" style={{ marginTop: 20 }}>
+        <div className="qactions-left">
+          <span className="qhint" style={{ margin: 0 }}>None of these match?</span>
+        </div>
+        <div className="qactions-right">
+          <button
+            className="link-btn"
+            onClick={onWriteFresh}
+            disabled={installing}
+          >
+            write fresh →
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ----- Done card -----
 const TARGET_LABELS: Record<Target, string> = {
   claude: "Claude Code",
@@ -944,11 +1193,59 @@ function DoneCard({
   const supportsScope = target === "claude";
   const effectiveScope: Scope = supportsScope ? scope : "project";
   const fsaSupported = canSaveToFolder();
+  // Global Claude installs go to ~/.claude/skills/<name>/. The browser's folder
+  // picker forces the user to navigate to ~ (which is hidden by default in
+  // macOS Finder) and pick the right place — easy to get wrong. For that one
+  // case we hide the picker and lead the user to the .zip flow instead. Every
+  // other target/scope combo lands in a project root, where picking the open
+  // folder is intuitive.
+  const pickerAllowed = fsaSupported && !(target === "claude" && effectiveScope === "global");
 
   const artifacts = useMemo(
     () => buildArtifacts(skillMd, slug, target, effectiveScope),
     [skillMd, slug, target, effectiveScope],
   );
+
+  // Sharing is lazy: we POST to /api/share when the user clicks copy, not on
+  // every skillMd change. The pipeline mutates skillMd several times
+  // (synthesis streams, optimizer splices new description), so eager sharing
+  // would burn through KV writes for transient states. We invalidate the
+  // cached ID whenever the inputs change so the next click re-shares.
+  const [installCommand, setInstallCommand] = useState("");
+  const [copiedCmd, setCopiedCmd] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [shareError, setShareError] = useState("");
+
+  useEffect(() => {
+    setInstallCommand("");
+    setShareError("");
+  }, [skillMd, slug, target, effectiveScope]);
+
+  async function handleCopyCommand() {
+    setShareError("");
+    let cmd = installCommand;
+    if (!cmd) {
+      setSharing(true);
+      try {
+        const id = await shareSkill(skillMd, slug, target, effectiveScope);
+        cmd = buildNpxCommand(id, window.location.origin);
+        setInstallCommand(cmd);
+      } catch (e: any) {
+        setShareError(e?.message?.slice(0, 80) || "couldn't share");
+        setSharing(false);
+        return;
+      }
+      setSharing(false);
+    }
+    try {
+      await navigator.clipboard.writeText(cmd);
+      setCopiedCmd(true);
+      setTimeout(() => setCopiedCmd(false), 1800);
+    } catch {
+      // Clipboard unavailable (insecure context, ancient browser) — the
+      // command stays visible for manual selection. Don't trip an error UI.
+    }
+  }
 
   // Reset confirmation when the user changes target/scope after a save.
   useEffect(() => {
@@ -1114,7 +1411,7 @@ function DoneCard({
       )}
 
       <div className="done-actions" style={{ opacity: pipelineActive ? 0.5 : 1 }}>
-        {fsaSupported && (
+        {pickerAllowed && (
           <button
             className="primary-btn big"
             onClick={handleSave}
@@ -1125,12 +1422,12 @@ function DoneCard({
           </button>
         )}
         <button
-          className={fsaSupported ? "ghost-btn" : "primary-btn big"}
+          className={pickerAllowed ? "ghost-btn" : "primary-btn big"}
           onClick={handleZip}
           disabled={pipelineActive}
           title="download a zip with the right folder layout"
         >
-          {fsaSupported ? "download .zip" : "↓ download .zip"}
+          {pickerAllowed ? "download .zip" : "↓ download .zip"}
         </button>
         <button
           className="ghost-btn"
@@ -1141,6 +1438,26 @@ function DoneCard({
         </button>
         <button className="link-btn" onClick={onReset}>forge another</button>
       </div>
+
+      {!pipelineActive && (
+        <div className="install-cli" aria-label="install via terminal">
+          <p className="cli-hint">{terminalHint(target, effectiveScope)}</p>
+          <pre className="cli-block">
+            {installCommand || `npx -y skillsmith-install@latest <click copy to generate>`}
+          </pre>
+          <button
+            type="button"
+            className="primary-btn cli-copy"
+            onClick={handleCopyCommand}
+            disabled={sharing}
+          >
+            {sharing ? "sharing…" : copiedCmd ? "copied ✓" : "↗ copy npx command"}
+          </button>
+          {shareError && (
+            <p className="cli-hint" style={{ color: "#b96a1c" }}>{shareError}</p>
+          )}
+        </div>
+      )}
 
       {synthError && (
         <div className="enhance-msg" style={{ marginTop: 14 }}>{synthError}</div>
@@ -1168,26 +1485,20 @@ function DoneCard({
       ) : (
         <div className="next-steps">
           <h4>what to do next</h4>
-          <NextStepsList target={target} scope={effectiveScope} fsaSupported={fsaSupported} />
+          <NextStepsList target={target} scope={effectiveScope} pickerAllowed={pickerAllowed} />
         </div>
       )}
     </div>
   );
 }
 
-function NextStepsList({ target, scope, fsaSupported }: { target: Target; scope: Scope; fsaSupported: boolean }) {
+function NextStepsList({ target, scope, pickerAllowed }: { target: Target; scope: Scope; pickerAllowed: boolean }) {
   if (target === "claude") {
-    if (fsaSupported) {
+    if (pickerAllowed) {
+      // Project scope only — global hides the picker.
       return (
         <ol>
-          <li>
-            Click <strong>save to folder…</strong> and pick{" "}
-            {scope === "global" ? (
-              <>your <code>~</code> (home) folder</>
-            ) : (
-              <>your project root</>
-            )}.
-          </li>
+          <li>Click <strong>save to folder…</strong> and pick your project root.</li>
           <li>
             We'll create <code>.claude/skills/&lt;name&gt;/SKILL.md</code> for you.
           </li>
@@ -1201,9 +1512,9 @@ function NextStepsList({ target, scope, fsaSupported }: { target: Target; scope:
         <li>
           Unzip into{" "}
           {scope === "global" ? (
-            <>your home folder — it contains <code>.claude/skills/&lt;name&gt;/</code></>
+            <>your home folder — files land at <code>~/.claude/skills/&lt;name&gt;/</code></>
           ) : (
-            <>your project root — it contains <code>.claude/skills/&lt;name&gt;/</code></>
+            <>your project root — files land at <code>.claude/skills/&lt;name&gt;/</code></>
           )}.
         </li>
         <li>{reloadHint("claude")}</li>
@@ -1211,7 +1522,7 @@ function NextStepsList({ target, scope, fsaSupported }: { target: Target; scope:
     );
   }
   if (target === "cursor") {
-    if (fsaSupported) {
+    if (pickerAllowed) {
       return (
         <ol>
           <li>Click <strong>save to folder…</strong> and pick your project root.</li>
@@ -1230,7 +1541,7 @@ function NextStepsList({ target, scope, fsaSupported }: { target: Target; scope:
   }
   return (
     <ol>
-      <li>{fsaSupported ? "Save or download the .md file." : "Download the .md file."}</li>
+      <li>{pickerAllowed ? "Save or download the .md file." : "Download the .md file."}</li>
       <li>Drop it wherever your agent reads instructions from.</li>
     </ol>
   );
