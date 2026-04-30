@@ -1,4 +1,4 @@
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { IncomingMessage, ServerResponse } from "node:http";
 
@@ -62,6 +62,18 @@ function apiDevMiddleware(): Plugin {
   };
 }
 
-export default defineConfig({
-  plugins: [react(), apiDevMiddleware()],
+export default defineConfig(({ mode }) => {
+  // Vite normally loads .env files into import.meta.env (client side).
+  // Our serverless handler reads process.env, so we mirror non-VITE_ keys
+  // into process.env for dev. (Vercel sets process.env in prod automatically.)
+  const env = loadEnv(mode, process.cwd(), "");
+  for (const [k, v] of Object.entries(env)) {
+    if (!k.startsWith("VITE_") && process.env[k] === undefined) {
+      process.env[k] = v;
+    }
+  }
+
+  return {
+    plugins: [react(), apiDevMiddleware()],
+  };
 });

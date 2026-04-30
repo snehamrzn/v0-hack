@@ -25,20 +25,20 @@ const INTERVIEW = [
   },
   {
     key: "trigger",
-    prompt: "When should Claude reach for this skill? Give a couple of example moments.",
+    prompt: "When should the agent reach for this skill? Give a couple of example moments.",
     placeholder: "e.g. when I paste meeting notes, when I say 'write the standup'…",
-    hint: "Specific phrases and contexts help Claude know when to use it.",
+    hint: "Specific phrases and contexts help the agent know when to use it.",
   },
   {
     key: "steps",
-    prompt: "Walk me through what Claude should actually do, step by step.",
+    prompt: "Walk me through what the agent should actually do, step by step.",
     placeholder: "1. Read the notes\n2. Group by project\n3. Draft 3–5 bullets in our team voice…",
     hint: "Imperative voice. One step per line.",
     multiline: true,
   },
   {
     key: "gotchas",
-    prompt: "Anything Claude tends to get wrong here? Quirks, gotchas, things to avoid?",
+    prompt: "Anything the agent tends to get wrong here? Quirks, gotchas, things to avoid?",
     placeholder: "e.g. don't invent attendees, never use the word 'synergy'…",
     hint: "This is the most valuable section. Be specific.",
     multiline: true,
@@ -144,7 +144,14 @@ export default function App() {
   const current = INTERVIEW[step];
   const isDone = started && step >= INTERVIEW.length;
 
-  const skillMd = useMemo(() => buildSkillMd(answers), [answers]);
+  // Live preview during the interview = mechanical template.
+  // Once the interview ends, we replace it with a model-synthesized SKILL.md.
+  const templateMd = useMemo(() => buildSkillMd(answers), [answers]);
+  const [synthesizedMd, setSynthesizedMd] = useState<string | null>(null);
+  const [synthesizing, setSynthesizing] = useState(false);
+  const [synthError, setSynthError] = useState<string | null>(null);
+  const synthFiredRef = useRef(false);
+  const skillMd = synthesizedMd ?? templateMd;
 
   useEffect(() => {
     if (started && inputRef.current) {
@@ -155,6 +162,71 @@ export default function App() {
   useEffect(() => {
     if (previewRef.current) previewRef.current.scrollTop = 0;
   }, [step]);
+
+  // When the interview finishes, ask the model to synthesize the final SKILL.md
+  // using the skill-creator system prompt. We use a ref guard so we only fire
+  // once per "interview completed" transition — putting `synthesizing` /
+  // `synthesizedMd` in the dep array would self-cancel the effect mid-stream.
+  useEffect(() => {
+    if (!isDone) {
+      synthFiredRef.current = false;
+      setSynthesizedMd(null);
+      setSynthError(null);
+      return;
+    }
+    if (synthFiredRef.current) return;
+    synthFiredRef.current = true;
+
+    (async () => {
+      setSynthesizing(true);
+      setSynthError(null);
+      try {
+        const answersBlock = INTERVIEW
+          .map(q => `${q.key}: ${answers[q.key] || "(skipped)"}`)
+          .join("\n");
+
+        const userMessage = `Mode: SYNTHESIZE_SKILL_MD
+
+Here are the user's interview answers. Produce the complete SKILL.md.
+
+${answersBlock}`;
+
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            messages: [{ role: "user", content: userMessage }],
+          }),
+        });
+
+        if (!res.ok || !res.body) {
+          const errText = await res.text().catch(() => "");
+          throw new Error(errText || `HTTP ${res.status}`);
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let acc = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          acc += decoder.decode(value, { stream: true });
+          setSynthesizedMd(acc);
+        }
+        acc += decoder.decode();
+        setSynthesizedMd(acc.trim());
+      } catch (e: any) {
+        console.error("[synthesize]", e);
+        setSynthError(
+          e?.message?.includes("ANTHROPIC_API_KEY")
+            ? "set ANTHROPIC_API_KEY in .env.local — using template fallback"
+            : "synthesis failed — using template fallback"
+        );
+      } finally {
+        setSynthesizing(false);
+      }
+    })();
+  }, [isDone]);
 
   function handleNext() {
     if (!current) return;
@@ -198,7 +270,9 @@ export default function App() {
         .map(q => `${q.key}: ${answers[q.key] || "(skipped)"}`)
         .join("\n");
 
-      const userMessage = `Field being polished: **${current.key}**
+      const userMessage = `Mode: POLISH_FIELD
+
+Field being polished: **${current.key}**
 
 Prior answers from this interview:
 ${priorContext || "(none yet — this is the first field)"}
@@ -321,12 +395,21 @@ ${draft}`;
                 onReset={handleReset}
                 msg={enhanceMsg}
                 name={answers.name}
+                synthesizing={synthesizing}
+                synthError={synthError}
               />
             )}
           </section>
 
           <section className="right">
-            <PreviewPane ref={previewRef} md={skillMd} answers={answers} />
+            <PreviewPane
+              ref={previewRef}
+              md={skillMd}
+              answers={answers}
+              synthesizing={synthesizing}
+              synthError={synthError}
+              isSynthesized={synthesizedMd !== null}
+            />
           </section>
         </main>
       )}
@@ -346,16 +429,14 @@ function Hero({ onStart }) {
           <span className="dot" /> a tiny workshop for non-coders
         </div>
         <h1 className="display">
-          Teach Claude
-          <br />
-          a new <em>trick</em>
+          Teach your agent a new <em>trick</em>
           <Underline className="title-underline" />
           <span className="hero-flourish">
             <Star size={36} />
           </span>
         </h1>
         <p className="lede">
-          A skill is a little instruction card you hand to Claude — so it knows
+          A skill is a little instruction card you hand to your agent — so it knows
           how <em>you</em> like things done. We'll interview you, polish your
           words, and hand you back a tidy <code>SKILL.md</code> file.
         </p>
@@ -492,36 +573,70 @@ function QuestionCard({ question, draft, setDraft, onNext, onSkip, onBack, onEnh
 }
 
 // ----- Done card -----
-function DoneCard({ onDownload, onCopy, onReset, msg, name }) {
+function DoneCard({ onDownload, onCopy, onReset, msg, name, synthesizing, synthError }: any) {
   return (
     <div className="qcard done-card">
       <div className="done-stamp">
         <Star size={42} />
       </div>
       <h2 className="question">
-        Your skill is forged.
+        {synthesizing ? "Forging your skill…" : "Your skill is forged."}
       </h2>
       <p className="qhint" style={{ marginBottom: 24 }}>
-        Take <em>{name || "your skill"}</em> home as a Markdown file. Drop it
-        into <code>~/.claude/skills/</code> or upload to Claude.ai.
+        {synthesizing ? (
+          <>
+            The skill-creator is rewriting your answers into a polished{" "}
+            <code>SKILL.md</code> — watch it stream into the preview.
+          </>
+        ) : (
+          <>
+            Take <em>{name || "your skill"}</em> home as a Markdown file. Drop
+            it into <code>~/.claude/skills/</code> or upload to Claude.ai.
+          </>
+        )}
       </p>
 
-      <div className="done-actions">
-        <button className="primary-btn big" onClick={onDownload}>
+      {synthesizing && (
+        <div className="synth-loader" aria-live="polite">
+          <span className="synth-dot" />
+          <span className="synth-dot" />
+          <span className="synth-dot" />
+          <span className="synth-label">synthesizing with skill-creator</span>
+        </div>
+      )}
+
+      <div className="done-actions" style={{ opacity: synthesizing ? 0.5 : 1 }}>
+        <button
+          className="primary-btn big"
+          onClick={onDownload}
+          disabled={synthesizing}
+          title={synthesizing ? "wait for synthesis to finish" : ""}
+        >
           ↓ download SKILL.md
         </button>
-        <button className="ghost-btn" onClick={onCopy}>copy text</button>
+        <button
+          className="ghost-btn"
+          onClick={onCopy}
+          disabled={synthesizing}
+        >
+          copy text
+        </button>
         <button className="link-btn" onClick={onReset}>forge another</button>
       </div>
 
-      {msg && <div className="enhance-msg" style={{ marginTop: 14 }}>{msg}</div>}
+      {synthError && (
+        <div className="enhance-msg" style={{ marginTop: 14 }}>{synthError}</div>
+      )}
+      {msg && !synthError && (
+        <div className="enhance-msg" style={{ marginTop: 14 }}>{msg}</div>
+      )}
 
       <div className="next-steps">
         <h4>what to do next</h4>
         <ol>
           <li>Save the file as <code>SKILL.md</code> in a folder named after your skill.</li>
           <li>Move that folder into <code>~/.claude/skills/</code> (Claude Code) or upload to claude.ai.</li>
-          <li>Start a new chat and watch Claude pick it up automatically.</li>
+          <li>Start a new chat and watch your agent pick it up automatically.</li>
         </ol>
       </div>
     </div>
@@ -529,9 +644,16 @@ function DoneCard({ onDownload, onCopy, onReset, msg, name }) {
 }
 
 // ----- Preview pane -----
-const PreviewPane = React.forwardRef<any, any>(({ md, answers }, ref) => {
+const PreviewPane = React.forwardRef<any, any>(({ md, answers, synthesizing, synthError, isSynthesized }, ref) => {
+  const status = synthesizing
+    ? "synthesizing with skill-creator…"
+    : synthError
+    ? synthError
+    : isSynthesized
+    ? "synthesized ✶"
+    : "live preview";
   return (
-    <div className="preview" ref={ref}>
+    <div className={`preview ${synthesizing ? "is-synthesizing" : ""}`} ref={ref}>
       <div className="preview-chrome">
         <span className="dot d1" />
         <span className="dot d2" />
@@ -544,7 +666,7 @@ const PreviewPane = React.forwardRef<any, any>(({ md, answers }, ref) => {
         <RenderedMd md={md} />
       </pre>
       <div className="preview-foot">
-        <span>live preview</span>
+        <span>{status}</span>
         <span className="char-count">{md.length} chars</span>
       </div>
     </div>
@@ -610,7 +732,7 @@ function HowItWorks() {
         </div>
         <div className="how-card">
           <div className="how-num">02</div>
-          <h3>Claude polishes your words.</h3>
+          <h3>Agent polishes your words.</h3>
           <p>One click and the muse tightens grammar, sharpens specifics, and shapes your steps into proper imperative voice.</p>
         </div>
         <div className="how-card">
@@ -631,7 +753,7 @@ function Footer() {
         <span>skillsmith — for the rest of us</span>
       </div>
       <div className="foot-r">
-        <span>made for non-coders who want claude to do things their way</span>
+        <span>made for non-coders who want their agent to do things their way</span>
       </div>
     </footer>
   );

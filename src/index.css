@@ -122,7 +122,7 @@
     align-items: center;
     min-height: 78vh;
   }
-  .hero-inner { max-width: 640px; }
+  .hero-inner { max-width: 760px; }
 
   .eyebrow {
     display: inline-flex; align-items: center; gap: 10px;
@@ -140,7 +140,8 @@
 
   .display {
     font-family: "Fraunces", serif;
-    font-size: clamp(56px, 8vw, 112px);
+    font-size: clamp(40px, 5.4vw, 76px);
+    white-space: nowrap;
     font-weight: 400;
     line-height: 0.96;
     letter-spacing: -0.035em;
@@ -442,6 +443,51 @@
   }
   .qactions-left, .qactions-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 
+  /* Synthesis loader */
+  .synth-loader {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 8px 14px;
+    margin-bottom: 18px;
+    background: rgba(232,98,61,0.08);
+    border: 1px dashed var(--accent);
+    border-radius: 999px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+    color: var(--accent);
+    letter-spacing: 0.04em;
+  }
+  .synth-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent);
+    animation: synth-bounce 1.2s infinite ease-in-out;
+  }
+  .synth-dot:nth-child(2) { animation-delay: 0.15s; }
+  .synth-dot:nth-child(3) { animation-delay: 0.3s; }
+  .synth-label { margin-left: 4px; }
+  @keyframes synth-bounce {
+    0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+    40% { transform: translateY(-4px); opacity: 1; }
+  }
+
+  /* Subtle shimmer on the preview body while streaming */
+  .preview.is-synthesizing .preview-body {
+    position: relative;
+  }
+  .preview.is-synthesizing .preview-body::after {
+    content: "";
+    position: absolute; inset: 0;
+    background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(232,98,61,0.08) 50%,
+      transparent 100%);
+    animation: preview-shimmer 1.6s infinite linear;
+    pointer-events: none;
+  }
+  @keyframes preview-shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+
   /* Done card */
   .done-card { text-align: left; }
   .done-stamp {
@@ -531,7 +577,7 @@
   .md-colon { color: rgba(232,226,213,0.6); }
   .md-val { color: #FFC38B; }
   .md-h1 { color: #fff; font-weight: 600; }
-  .md-h2 { color: #BDBBFF; font-weight: 500; display: inline-block; }
+  .md-h2 { color: #BDBBFF; font-weight: 500; }
   .md-li { color: #E8E2D5; }
   .md-em { color: rgba(232,226,213,0.55); font-style: italic; }
   .md-code-fence { color: rgba(189,187,255,0.5); }
