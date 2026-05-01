@@ -128,6 +128,7 @@ ${params.draft}`;
     system: SYSTEM_PROMPT,
     messages: [{ role: "user", content: userMessage }],
     maxOutputTokens: 1024,
+    abortSignal: AbortSignal.timeout(50_000),
   });
   return text.trim();
 }
@@ -176,6 +177,7 @@ ${params.researchNotes || "(unavailable)"}`;
     system: SYSTEM_PROMPT,
     messages: [{ role: "user", content: userMessage }],
     maxOutputTokens: 2048,
+    abortSignal: AbortSignal.timeout(50_000),
   });
   return text.trim();
 }
@@ -202,6 +204,7 @@ ${params.skillMd}`;
     system: SYSTEM_PROMPT,
     messages: [{ role: "user", content: userMessage }],
     maxOutputTokens: 512,
+    abortSignal: AbortSignal.timeout(30_000),
   });
   return parseJsonObject<OptimizedDesc>(text.trim());
 }
@@ -234,6 +237,7 @@ Generate 3 plausible user requests where this skill should fire and 1 adjacent r
     system: TEST_TRIGGER_SYSTEM,
     messages: [{ role: "user", content: userMessage }],
     maxOutputTokens: 1024,
+    abortSignal: AbortSignal.timeout(30_000),
   });
   return parseJsonObject<{ tests: TriggerTest[] }>(text.trim());
 }

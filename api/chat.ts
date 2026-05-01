@@ -244,6 +244,7 @@ ${registryHits.map((hit, index) => `[${index + 1}] ${hit.url} — ${hit.name}${h
         system: SYSTEM_PROMPT,
         messages,
         maxOutputTokens: 512,
+        abortSignal: AbortSignal.timeout(30_000),
       });
       return result.toTextStreamResponse();
     }
@@ -254,6 +255,7 @@ ${registryHits.map((hit, index) => `[${index + 1}] ${hit.url} — ${hit.name}${h
         system: TEST_TRIGGER_SYSTEM,
         messages,
         maxOutputTokens: 1024,
+        abortSignal: AbortSignal.timeout(30_000),
       });
       return result.toTextStreamResponse();
     }
@@ -264,6 +266,7 @@ ${registryHits.map((hit, index) => `[${index + 1}] ${hit.url} — ${hit.name}${h
       system: SYSTEM_PROMPT,
       messages,
       maxOutputTokens: 2048,
+      abortSignal: AbortSignal.timeout(50_000),
     });
     return result.toTextStreamResponse();
   } catch (e) {

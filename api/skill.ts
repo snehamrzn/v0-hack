@@ -9,12 +9,19 @@ export default async function handler(req: Request): Promise<Response> {
     return new Response("invalid id", { status: 400 });
   }
 
-  const content = await loadSkill(id);
-  if (content == null) {
-    return new Response("not found", { status: 404 });
+  try {
+    const content = await loadSkill(id);
+    if (content == null) {
+      return new Response("not found", { status: 404 });
+    }
+    return new Response(content, {
+      headers: { "content-type": "application/json; charset=utf-8" },
+    });
+  } catch (e) {
+    console.error("[skill] loadSkill failed:", e);
+    return new Response(
+      JSON.stringify({ error: (e as Error)?.message || "load failed" }),
+      { status: 500, headers: { "content-type": "application/json" } }
+    );
   }
-
-  return new Response(content, {
-    headers: { "content-type": "application/json; charset=utf-8" },
-  });
 }

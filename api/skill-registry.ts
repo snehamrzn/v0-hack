@@ -40,7 +40,15 @@ export async function searchSkills(query: string, limit: number): Promise<SkillH
   const perPage = Math.min(limit * 3, 30);
   const url = `https://api.github.com/search/code?q=${q}&per_page=${perPage}`;
 
-  const res = await fetch(url, { headers });
+  let res: Response;
+  try {
+    res = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
+  } catch (e: any) {
+    if (e?.name === "TimeoutError" || e?.name === "AbortError") {
+      throw new Error("github search timed out after 8s");
+    }
+    throw new Error(`github search fetch failed: ${e?.message || e}`);
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`github search ${res.status}: ${text.slice(0, 200)}`);
