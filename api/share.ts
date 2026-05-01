@@ -27,8 +27,13 @@ export default async function handler(req: Request): Promise<Response> {
     return jsonError(`content too large (>${MAX_CONTENT_BYTES} bytes)`, 413);
   }
 
-  const id = await saveSkill(content);
-  return new Response(JSON.stringify({ id }), {
-    headers: { "content-type": "application/json" },
-  });
+  try {
+    const id = await saveSkill(content);
+    return new Response(JSON.stringify({ id }), {
+      headers: { "content-type": "application/json" },
+    });
+  } catch (e) {
+    console.error("[share] saveSkill failed:", e);
+    return jsonError((e as Error)?.message || "save failed", 500);
+  }
 }

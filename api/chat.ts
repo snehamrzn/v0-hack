@@ -3,6 +3,8 @@ import { streamText, stepCountIs } from "ai";
 import { createMCPClient } from "@ai-sdk/mcp";
 import { SKILL_CREATOR_PROMPT } from "./skill-creator-prompt";
 
+export const config = { maxDuration: 30 };
+
 const SYSTEM_PROMPT = `${SKILL_CREATOR_PROMPT}
 
 ---
@@ -165,6 +167,18 @@ async function openSkillRegistryClient(req: Request) {
 }
 
 export default async function handler(req: Request): Promise<Response> {
+  try {
+    return await handleChat(req);
+  } catch (e) {
+    console.error("[chat] unhandled error:", e);
+    return new Response(
+      JSON.stringify({ error: (e as Error)?.message || String(e) }),
+      { status: 500, headers: { "content-type": "application/json" } }
+    );
+  }
+}
+
+async function handleChat(req: Request): Promise<Response> {
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
   }
