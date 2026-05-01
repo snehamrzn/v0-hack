@@ -1,7 +1,7 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { streamText, stepCountIs } from "ai";
-import { SKILL_CREATOR_PROMPT } from "./skill-creator-prompt";
-import { searchSkills } from "./skill-registry";
+import { SKILL_CREATOR_PROMPT } from "./skill-creator-prompt.js";
+import { searchSkills } from "./skill-registry.js";
 
 export const runtime = "nodejs";
 

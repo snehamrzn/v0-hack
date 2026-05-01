@@ -1,4 +1,4 @@
-import { SKILL_CREATOR_PROMPT } from "./skill-creator-prompt";
+import { SKILL_CREATOR_PROMPT } from "./skill-creator-prompt.js";
 
 export const SYSTEM_PROMPT = `${SKILL_CREATOR_PROMPT}
 

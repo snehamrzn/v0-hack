@@ -8,8 +8,8 @@ import {
   synthesizeSkill,
   testSkillTrigger,
   type SkillAnswers,
-} from "../skill-pipeline";
-import { searchSkills } from "../skill-registry";
+} from "../skill-pipeline.js";
+import { searchSkills } from "../skill-registry.js";
 
 export const runtime = "nodejs";
 
