@@ -3,6 +3,8 @@ import { streamText, stepCountIs } from "ai";
 import { SKILL_CREATOR_PROMPT } from "./skill-creator-prompt";
 import { searchSkills } from "./skill-registry";
 
+export const runtime = "nodejs";
+
 const SYSTEM_PROMPT = `${SKILL_CREATOR_PROMPT}
 
 ---

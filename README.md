@@ -23,9 +23,9 @@ Each field has a "polish with skillsmith" button that rewrites your draft in the
 
 ## What happens after the last question
 
-First, a find-or-build check. Skillsmith queries its own Skill Registry MCP server (`/api/mcp`) which proxies GitHub Code Search for `filename:SKILL.md` matches. If a public skill already covers your topic, you can install it in one click instead of authoring a new one — the file is fetched from GitHub raw and dropped into the standard save flow. If nothing matches (or you click "write fresh"), the four-stage pipeline kicks in:
+First, a find-or-build check. Skillsmith searches public `SKILL.md` files on GitHub for prior art. If a public skill already covers your topic, you can install it in one click instead of authoring a new one — the file is fetched from GitHub raw and dropped into the standard save flow. If nothing matches (or you click "write fresh"), the four-stage pipeline kicks in:
 
-1. Research. Claude calls `search_skills` (via the MCP server) to find related prior art, then runs 2 to 4 web searches on the skill's domain so the synthesis can ground itself in real practice instead of guessing. Sources show up in the right-hand panel.
+1. Research. Skillsmith pulls related prior-art skills, then Claude runs 2 to 4 web searches on the skill's domain so the synthesis can ground itself in real practice instead of guessing. Sources show up in the right-hand panel.
 2. Synthesize. Your answers plus the research notes go in, a complete `SKILL.md` comes out and streams into the preview.
 3. Sharpen the description. The frontmatter `description:` line gets rewritten to be more aggressive about triggering. Agents under-trigger on vague descriptions, so this stage names concrete phrases the user might say.
 4. Stress-test the trigger. Claude generates fake user requests and checks whether the description would fire on the right ones and stay quiet on the rest. If something fails, you can rerun stage 3 with the failures fed back in.
@@ -58,7 +58,7 @@ Both keys are read server-side. They never reach the browser.
 
 - React 18 and Vite
 - Vercel AI SDK with the Anthropic provider
-- `mcp-handler` + `zod` for the in-repo Skill Registry MCP server
+- `mcp-handler` + `zod` for the in-repo Skillsmith MCP server
 - JSZip for the fallback download
 
 ## Layout
@@ -66,7 +66,8 @@ Both keys are read server-side. They never reach the browser.
 ```
 api/chat.ts                   serverless endpoint, wires the system prompt to streamText
 api/skill-creator-prompt.ts   the prompt itself, with mode markers
-api/mcp/[transport].ts        Skill Registry MCP server — exposes search_skills via GitHub
+api/mcp/[transport].ts        Skillsmith MCP server — exposes search plus the full skill pipeline
+api/skill-pipeline.ts         shared prompts + non-UI pipeline helpers for chat and MCP
 src/App.tsx                   UI + find-or-build + the four-stage pipeline
 src/skill-formats.ts          turns one SKILL.md into per-target files
 src/save-handlers.ts          File System Access API and the zip fallback
@@ -77,4 +78,14 @@ The pipeline lives in `App.tsx` as five `useEffect` blocks chained on state null
 
 ## The MCP server
 
-`api/mcp/[transport].ts` is a standalone MCP server other agents can install. Connect any MCP-capable client to `https://<your-deployment>/api/mcp/mcp` (HTTP transport) and you'll get the `search_skills` tool — a thin proxy over GitHub Code Search for `filename:SKILL.md` matches, deduped by repo.
+`api/mcp/[transport].ts` is a standalone MCP server other agents can install. Connect any MCP-capable client to `https://<your-deployment>/api/mcp/mcp` (HTTP transport) and you'll get the same major stages the webpage uses:
+
+- `search_skills` — find existing public `SKILL.md` files on GitHub
+- `polish_skill_field` — rewrite one interview field in Skillsmith's house style
+- `research_skill` — run the research stage and return findings/pitfalls/sources
+- `synthesize_skill` — turn interview answers into a complete `SKILL.md`
+- `optimize_skill_description` — sharpen the frontmatter `description:` line
+- `test_skill_trigger` — generate positive/negative trigger tests
+- `run_skill_pipeline` — run research → synthesize → optimize → test end to end
+
+The webpage still uses `src/App.tsx` + `/api/chat` for its own streaming UX, but the MCP surface now mirrors that pipeline for external clients.
