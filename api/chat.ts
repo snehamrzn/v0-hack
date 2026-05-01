@@ -3,7 +3,7 @@ import { streamText, stepCountIs } from "ai";
 import { createMCPClient } from "@ai-sdk/mcp";
 import { SKILL_CREATOR_PROMPT } from "./skill-creator-prompt.js";
 
-export const config = { maxDuration: 30 };
+export const config = { maxDuration: 60 };
 
 const SYSTEM_PROMPT = `${SKILL_CREATOR_PROMPT}
 
@@ -256,7 +256,7 @@ async function handleChat(req: Request): Promise<Response> {
         tools: tools as any,
         stopWhen: stepCountIs(8),
         maxOutputTokens: 4096,
-        abortSignal: AbortSignal.timeout(30_000),
+        abortSignal: AbortSignal.timeout(55_000),
         onFinish: async () => {
           if (mcp) await mcp.client.close().catch(() => {});
         },
