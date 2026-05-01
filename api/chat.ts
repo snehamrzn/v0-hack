@@ -1,9 +1,7 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { streamText, stepCountIs } from "ai";
-import { createMCPClient } from "@ai-sdk/mcp";
-import { SKILL_CREATOR_PROMPT } from "./skill-creator-prompt.js";
-
-export const config = { maxDuration: 60 };
+import { SKILL_CREATOR_PROMPT } from "./skill-creator-prompt";
+import { searchSkills } from "./skill-registry";
 
 const SYSTEM_PROMPT = `${SKILL_CREATOR_PROMPT}
 
@@ -45,12 +43,12 @@ Return ONLY the raw SKILL.md content (starting with \`---\`). No preamble, no su
 
 ## Mode: RESEARCH_TOPIC
 
-The user message contains a skill-in-progress (name, purpose, trigger). You have two tools: \`search_skills\` (queries a public registry of existing SKILL.md files via MCP) and \`web_search\` (general web search). Research the skill's domain so the writer can ground the final SKILL.md in real-world best practices and existing prior art.
+The user message contains a skill-in-progress (name, purpose, trigger). You have the \`web_search\` tool for general web search. The message may also include a \`registry_hits:\` block containing existing public SKILL.md examples. Research the skill's domain so the writer can ground the final SKILL.md in real-world best practices and existing prior art.
 
 Required behavior:
 - Read only the name, purpose, and trigger from the user message.
-- **First**, call \`search_skills\` exactly once with the skill's purpose as the query (e.g. "react testing", "sql migrations"). If matches come back, cite them in \`## Sources\` so synthesis can reference how other authors structured similar skills. If no matches, just continue.
-- **Then**, issue **2–4 distinct web_search calls**. Vary your queries across these flavors: (a) authoritative best-practice articles in the domain, (b) common pitfalls and "mistakes when X" pieces, (c) recent (2024–2026) tooling and patterns, (d) workflow checklists. Do not settle for one search even if it looks complete.
+- If a \`registry_hits:\` block is present, treat those skills as prior art and cite any relevant ones in \`## Sources\`.
+- Issue **2–4 distinct web_search calls**. Vary your queries across these flavors: (a) authoritative best-practice articles in the domain, (b) common pitfalls and "mistakes when X" pieces, (c) recent (2024–2026) tooling and patterns, (d) workflow checklists. Do not settle for one search even if it looks complete.
 - Output exactly this structure, no preamble, no commentary:
 
 \`\`\`
@@ -83,10 +81,6 @@ Output strict JSON and nothing else — no markdown, no preamble, no surrounding
 \`\`\`
 {"original": "<original description value>", "improved": "<rewritten value>", "changes": "<one-sentence rationale>"}
 \`\`\``;
-
-const SEARCH_REGISTRY_SYSTEM = `You search a public registry of existing agent skills via the \`search_skills\` MCP tool.
-
-The user message will give you a topic. Call \`search_skills\` exactly once with that topic as the query (limit 5). Then output **only** the JSON the tool returned — no preamble, no markdown fence, no commentary. If the tool errors, output {"hits": []}.`;
 
 const TEST_TRIGGER_SYSTEM = `You are deciding whether to use a skill based solely on its name and description. Imagine you have many skills available and you must pick the right one for the user's request.
 
@@ -134,36 +128,14 @@ function sentinelFor(mode: Mode): string | null {
   return null;
 }
 
-// Compute the URL of the Skill Registry MCP server. In prod (Vercel) we
-// auto-detect the deployment URL via VERCEL_URL; in dev we default to
-// localhost. Override with MCP_URL env var for testing or to point at an
-// external MCP server.
-function getMcpUrl(req: Request): string {
-  if (process.env.MCP_URL) return process.env.MCP_URL;
-  if (process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL}/api/mcp/mcp`;
-  }
-  const host = req.headers.get("host") ?? "localhost:5173";
-  const proto = host.startsWith("localhost") ? "http" : "https";
-  return `${proto}://${host}/api/mcp/mcp`;
+function lastUserContent(messages: any[]): string {
+  const last = messages[messages.length - 1];
+  return typeof last?.content === "string" ? last.content : "";
 }
 
-// Open an MCP client to our Skill Registry server. Returns null on failure
-// so callers can degrade gracefully (e.g. RESEARCH_TOPIC falls back to
-// web_search-only). The returned client must be closed by the caller, ideally
-// in streamText's onFinish callback.
-async function openSkillRegistryClient(req: Request) {
-  try {
-    const url = getMcpUrl(req);
-    const client = await createMCPClient({
-      transport: { type: "http" as const, url },
-    });
-    const tools = await client.tools();
-    return { client, tools };
-  } catch (e) {
-    console.warn("[mcp] failed to open skill-registry client:", e);
-    return null;
-  }
+function extractBlockField(content: string, field: string): string {
+  const re = new RegExp(`^${field}:\\s*([\\s\\S]*?)(?:\\n\\w+:|$)`, "m");
+  return re.exec(content)?.[1]?.trim() ?? "";
 }
 
 export default async function handler(req: Request): Promise<Response> {
@@ -181,14 +153,6 @@ export default async function handler(req: Request): Promise<Response> {
 async function handleChat(req: Request): Promise<Response> {
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
-  }
-
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return new Response(
-      JSON.stringify({ error: "ANTHROPIC_API_KEY not set on the server" }),
-      { status: 500, headers: { "content-type": "application/json" } }
-    );
   }
 
   let body: any;
@@ -209,57 +173,65 @@ async function handleChat(req: Request): Promise<Response> {
     );
   }
 
-  const anthropic = createAnthropic({ apiKey });
-  const model = anthropic("claude-sonnet-4-5");
   const mode = detectMode(messages);
+  const content = lastUserContent(messages);
 
   try {
     if (mode === "SEARCH_REGISTRY") {
-      // Lightweight mode used by App.tsx to populate the find-or-build screen.
-      // Forces the model to call search_skills exactly once and return JSON.
-      const mcp = await openSkillRegistryClient(req);
-      if (!mcp) {
-        // MCP unreachable — return empty hits so the UI auto-advances to
-        // the write-fresh path.
+      // This path powers the find-or-build screen and should stay fast.
+      // Skip the LLM entirely and hit the shared registry search directly.
+      const query = extractBlockField(content, "query");
+      if (!query) {
         return new Response('{"hits":[]}', {
           status: 200,
           headers: { "content-type": "text/plain" },
         });
       }
-      const result = streamText({
-        model,
-        system: SEARCH_REGISTRY_SYSTEM,
-        messages,
-        tools: mcp.tools as any,
-        stopWhen: stepCountIs(3),
-        maxOutputTokens: 1024,
-        abortSignal: AbortSignal.timeout(20_000),
-        onFinish: async () => {
-          await mcp.client.close().catch(() => {});
-        },
+
+      const hits = await searchSkills(query, 5).catch(() => []);
+      return new Response(JSON.stringify({ hits }), {
+        status: 200,
+        headers: { "content-type": "text/plain" },
       });
-      return result.toTextStreamResponse();
     }
 
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      return new Response(
+        JSON.stringify({ error: "ANTHROPIC_API_KEY not set on the server" }),
+        { status: 500, headers: { "content-type": "application/json" } }
+      );
+    }
+
+    const anthropic = createAnthropic({ apiKey });
+    const model = anthropic("claude-sonnet-4-5");
+
     if (mode === "RESEARCH_TOPIC") {
-      // Open MCP client so the model can also call search_skills alongside
-      // web_search. If MCP fails, degrade gracefully to web_search only.
-      const mcp = await openSkillRegistryClient(req);
+      const purpose = extractBlockField(content, "purpose");
+      const name = extractBlockField(content, "name");
+      const registryQuery = purpose || name;
+      const registryHits = registryQuery
+        ? await searchSkills(registryQuery, 5).catch(() => [])
+        : [];
+      const researchMessage =
+        registryHits.length === 0
+          ? content
+          : `${content}
+
+registry_hits:
+${registryHits.map((hit, index) => `[${index + 1}] ${hit.url} — ${hit.name}${hit.description ? ` (${hit.description})` : ""}`).join("\n")}`;
+
       const tools = {
-        web_search: anthropic.tools.webSearch_20250305({ maxUses: 4 }),
-        ...(mcp?.tools ?? {}),
+        web_search: anthropic.tools.webSearch_20250305({ maxUses: 3 }),
       };
       const result = streamText({
         model,
         system: SYSTEM_PROMPT,
-        messages,
-        tools: tools as any,
-        stopWhen: stepCountIs(8),
-        maxOutputTokens: 4096,
-        abortSignal: AbortSignal.timeout(55_000),
-        onFinish: async () => {
-          if (mcp) await mcp.client.close().catch(() => {});
-        },
+        messages: [{ role: "user", content: researchMessage }],
+        tools,
+        stopWhen: stepCountIs(6),
+        maxOutputTokens: 2048,
+        abortSignal: AbortSignal.timeout(45_000),
       });
       return result.toTextStreamResponse();
     }
