@@ -1,7 +1,7 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { streamText, stepCountIs } from "ai";
 import { createMCPClient } from "@ai-sdk/mcp";
-import { SKILL_CREATOR_PROMPT } from "./skill-creator-prompt";
+import { SKILL_CREATOR_PROMPT } from "./skill-creator-prompt.js";
 
 export const config = { maxDuration: 30 };
 

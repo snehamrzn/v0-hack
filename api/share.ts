@@ -1,4 +1,4 @@
-import { saveSkill } from "./storage";
+import { saveSkill } from "./storage.js";
 
 const MAX_CONTENT_BYTES = 100_000;
 
