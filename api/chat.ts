@@ -139,6 +139,18 @@ function extractBlockField(content: string, field: string): string {
 }
 
 export default async function handler(req: Request): Promise<Response> {
+  try {
+    return await handleChat(req);
+  } catch (e) {
+    console.error("[chat] unhandled error:", e);
+    return new Response(
+      JSON.stringify({ error: (e as Error)?.message || String(e) }),
+      { status: 500, headers: { "content-type": "application/json" } }
+    );
+  }
+}
+
+async function handleChat(req: Request): Promise<Response> {
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
   }
