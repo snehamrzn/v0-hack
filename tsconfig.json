@@ -13,8 +13,9 @@
     "jsx": "react-jsx",
     "strict": false,
     "noImplicitAny": false,
-    "allowJs": true
+    "allowJs": true,
+    "types": ["node"]
   },
-  "include": ["src"],
+  "include": ["src", "api"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
