@@ -8,10 +8,11 @@ import {
   synthesizeSkill,
   testSkillTrigger,
   type SkillAnswers,
-} from "../skill-pipeline.js";
-import { searchSkills } from "../skill-registry.js";
+} from "@/lib/skill-pipeline";
+import { searchSkills } from "@/lib/skill-registry";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 function textResult(payload: unknown, isError = false) {
   return {
@@ -258,4 +259,4 @@ const handler = createMcpHandler(
   }
 );
 
-export default handler;
+export { handler as GET, handler as POST };

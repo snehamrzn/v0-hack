@@ -1,4 +1,7 @@
-import { saveSkill } from "./storage.js";
+import { saveSkill } from "@/lib/storage";
+
+export const runtime = "nodejs";
+export const maxDuration = 30;
 
 const MAX_CONTENT_BYTES = 100_000;
 
@@ -9,9 +12,7 @@ function jsonError(error: string, status: number): Response {
   });
 }
 
-export default async function handler(req: Request): Promise<Response> {
-  if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
-
+export async function POST(req: Request): Promise<Response> {
   let body: any;
   try {
     body = await req.json();

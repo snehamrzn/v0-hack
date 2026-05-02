@@ -1,10 +1,10 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { generateText } from "ai";
-import { searchSkills, type SkillHit } from "./skill-registry.js";
+import { searchSkills, type SkillHit } from "./skill-registry";
 import {
   SYSTEM_PROMPT,
   TEST_TRIGGER_SYSTEM,
-} from "./skill-prompts.js";
+} from "./skill-prompts";
 
 export type ResearchSource = { n: number; url: string; title: string };
 export type OptimizedDesc = { original: string; improved: string; changes: string };

@@ -1,8 +1,9 @@
-import { loadSkill } from "./storage.js";
+import { loadSkill } from "@/lib/storage";
 
-export default async function handler(req: Request): Promise<Response> {
-  if (req.method !== "GET") return new Response("Method not allowed", { status: 405 });
+export const runtime = "nodejs";
+export const maxDuration = 30;
 
+export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
   if (!id || !/^[a-z0-9]{6,16}$/.test(id)) {
