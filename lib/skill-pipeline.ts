@@ -1,5 +1,5 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
-import { generateText } from "ai";
+import { generateText, stepCountIs } from "ai";
 import { searchSkills, type SkillHit } from "./skill-registry";
 import {
   SYSTEM_PROMPT,
@@ -127,7 +127,7 @@ ${params.draft}`;
     model,
     system: SYSTEM_PROMPT,
     messages: [{ role: "user", content: userMessage }],
-    maxOutputTokens: 1024,
+    maxOutputTokens: 2048,
     abortSignal: AbortSignal.timeout(50_000),
   });
   return text.trim();
@@ -147,6 +147,7 @@ export async function researchSkill(
     tools: {
       web_search: anthropic.tools.webSearch_20250305({ maxUses: 3 }),
     },
+    stopWhen: stepCountIs(6),
     maxOutputTokens: 2048,
     abortSignal: AbortSignal.timeout(45_000),
   });
