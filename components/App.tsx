@@ -152,6 +152,21 @@ export default function App() {
   const [tweaks, setTweak] = useTweaks(TWEAKS);
   const [step, setStep] = useState(0);
   const [started, setStarted] = useState(false);
+  const [apiKey, setApiKey] = useState<string>("");
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem("anthropic-api-key");
+      if (stored) setApiKey(stored);
+    } catch {}
+  }, []);
+  const saveApiKey = (key: string) => {
+    const trimmed = key.trim();
+    setApiKey(trimmed);
+    try {
+      if (trimmed) window.localStorage.setItem("anthropic-api-key", trimmed);
+      else window.localStorage.removeItem("anthropic-api-key");
+    } catch {}
+  };
   const [answers, setAnswers] = useState<any>({});
   const [draft, setDraft] = useState("");
   const [enhancing, setEnhancing] = useState(false);
@@ -269,7 +284,10 @@ export default function App() {
         const userMessage = `Mode: SEARCH_REGISTRY\n\nquery: ${query}`;
         const res = await fetch("/api/chat", {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: {
+            "content-type": "application/json",
+            ...(apiKey ? { "x-anthropic-api-key": apiKey } : {}),
+          },
           body: JSON.stringify({
             messages: [{ role: "user", content: userMessage }],
           }),
@@ -370,7 +388,10 @@ trigger: ${answers.trigger || "(none)"}`;
 
         const res = await fetch("/api/chat", {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: {
+            "content-type": "application/json",
+            ...(apiKey ? { "x-anthropic-api-key": apiKey } : {}),
+          },
           body: JSON.stringify({
             messages: [{ role: "user", content: userMessage }],
           }),
@@ -441,7 +462,10 @@ ${researchNotes || "(unavailable)"}`;
 
         const res = await fetch("/api/chat", {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: {
+            "content-type": "application/json",
+            ...(apiKey ? { "x-anthropic-api-key": apiKey } : {}),
+          },
           body: JSON.stringify({
             messages: [{ role: "user", content: userMessage }],
           }),
@@ -466,8 +490,8 @@ ${researchNotes || "(unavailable)"}`;
       } catch (e: any) {
         console.error("[synthesize]", e);
         setSynthError(
-          e?.message?.includes("ANTHROPIC_API_KEY")
-            ? "set ANTHROPIC_API_KEY in .env.local — using template fallback"
+          /api key/i.test(e?.message || "")
+            ? "Anthropic key was rejected — re-enter it from the header — using template fallback"
             : "synthesis failed — using template fallback"
         );
       } finally {
@@ -501,7 +525,10 @@ ${synthesizedMd}`;
 
         const res = await fetch("/api/chat", {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: {
+            "content-type": "application/json",
+            ...(apiKey ? { "x-anthropic-api-key": apiKey } : {}),
+          },
           body: JSON.stringify({
             messages: [{ role: "user", content: userMessage }],
           }),
@@ -579,7 +606,10 @@ Generate 3 plausible user requests where this skill should fire and 1 adjacent r
 
         const res = await fetch("/api/chat", {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: {
+            "content-type": "application/json",
+            ...(apiKey ? { "x-anthropic-api-key": apiKey } : {}),
+          },
           body: JSON.stringify({
             messages: [{ role: "user", content: `Mode: TEST_TRIGGER\n\n${userMessage}` }],
           }),
@@ -642,7 +672,10 @@ ${synthesizedMd}`;
 
       const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          ...(apiKey ? { "x-anthropic-api-key": apiKey } : {}),
+        },
         body: JSON.stringify({
           messages: [{ role: "user", content: userMessage }],
         }),
@@ -733,7 +766,10 @@ ${draft}`;
 
       const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          ...(apiKey ? { "x-anthropic-api-key": apiKey } : {}),
+        },
         body: JSON.stringify({
           messages: [{ role: "user", content: userMessage }],
         }),
@@ -765,8 +801,8 @@ ${draft}`;
     } catch (e: any) {
       console.error(e);
       setEnhanceMsg(
-        e?.message?.includes("ANTHROPIC_API_KEY")
-          ? "set ANTHROPIC_API_KEY in .env.local"
+        /api key/i.test(e?.message || "")
+          ? "Anthropic key was rejected"
           : "couldn't reach the muse"
       );
       setTimeout(() => setEnhanceMsg(""), 3000);
@@ -810,11 +846,30 @@ ${draft}`;
           <a href="#how">how it works</a>
           <a href="#connect">connect to your agent</a>
           <a href="#about">about skills</a>
+          {apiKey && (
+            <button
+              className="ghost-btn"
+              title="Update or clear your Anthropic key (stored only in this browser)"
+              onClick={() => {
+                const next = window.prompt(
+                  "Anthropic API key (leave empty to clear):",
+                  apiKey,
+                );
+                if (next !== null) {
+                  saveApiKey(next);
+                  if (!next.trim()) setStarted(false);
+                }
+              }}
+            >
+              api key ✓
+            </button>
+          )}
           <button className="ghost-btn" onClick={handleReset}>start over</button>
         </nav>
       </header>
 
-      {!started && <Hero onStart={handleStart} />}
+      {!started && !apiKey && <ApiKeyGate onSave={saveApiKey} />}
+      {!started && apiKey && <Hero onStart={handleStart} />}
 
       {started && (
         <main className="workshop">
@@ -896,6 +951,86 @@ ${draft}`;
       {!started && <ConnectMcp />}
       {!started && <Footer />}
     </div>
+  );
+}
+
+// ----- ApiKeyGate -----
+function ApiKeyGate({ onSave }: { onSave: (key: string) => void }) {
+  const [value, setValue] = useState("");
+  const [touched, setTouched] = useState(false);
+  const trimmed = value.trim();
+  const looksLikeKey = trimmed.startsWith("sk-ant-");
+  const showWarn = touched && trimmed.length > 0 && !looksLikeKey;
+
+  return (
+    <section className="hero">
+      <div className="hero-inner">
+        <div className="eyebrow">
+          <span className="dot" /> bring your own key
+        </div>
+        <h1 className="display">
+          Paste your Anthropic key to <em>begin</em>
+          <Underline className="title-underline" />
+        </h1>
+        <p className="lede">
+          This is a free demo, so it doesn't ship with a shared key. Paste your
+          own Anthropic API key to run the interview — it's saved only in your
+          browser (localStorage) and forwarded to Anthropic on each request.
+          Your key never gets logged or stored on our server.
+        </p>
+        <form
+          className="hero-cta"
+          style={{ flexDirection: "column", alignItems: "stretch", gap: 12, maxWidth: 520 }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            setTouched(true);
+            if (trimmed) onSave(trimmed);
+          }}
+        >
+          <input
+            type="password"
+            placeholder="sk-ant-…"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onBlur={() => setTouched(true)}
+            autoComplete="off"
+            spellCheck={false}
+            style={{
+              padding: "12px 14px",
+              fontFamily: "inherit",
+              fontSize: 15,
+              borderRadius: 8,
+              border: "1px solid rgba(0,0,0,0.18)",
+              background: "rgba(255,255,255,0.7)",
+              outline: "none",
+            }}
+          />
+          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <button className="primary-btn" type="submit" disabled={!trimmed}>
+              Save key & continue
+              <span className="arrow-inline">→</span>
+            </button>
+            <a
+              className="cta-aside"
+              href="https://console.anthropic.com/settings/keys"
+              target="_blank"
+              rel="noreferrer"
+              style={{ textDecoration: "underline" }}
+            >
+              get a key →
+            </a>
+          </div>
+          {showWarn && (
+            <span className="cta-aside" style={{ color: "#a04040" }}>
+              that doesn't look like an Anthropic key — they start with{" "}
+              <code>sk-ant-</code>. saving anyway is fine.
+            </span>
+          )}
+        </form>
+      </div>
+
+      <SkillCardSample />
+    </section>
   );
 }
 

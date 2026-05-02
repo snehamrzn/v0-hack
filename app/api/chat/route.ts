@@ -102,11 +102,15 @@ async function handleChat(req: Request): Promise<Response> {
       });
     }
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+    const headerKey = req.headers.get("x-anthropic-api-key")?.trim();
+    const apiKey = headerKey || process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       return new Response(
-        JSON.stringify({ error: "ANTHROPIC_API_KEY not set on the server" }),
-        { status: 500, headers: { "content-type": "application/json" } }
+        JSON.stringify({
+          error:
+            "Anthropic API key required. Paste your key in the in-app key field — this demo does not use a shared key.",
+        }),
+        { status: 400, headers: { "content-type": "application/json" } }
       );
     }
 

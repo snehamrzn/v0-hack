@@ -1,14 +1,5 @@
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
-import {
-  optimizeSkillDescription,
-  polishSkillField,
-  researchSkill,
-  runSkillPipeline,
-  synthesizeSkill,
-  testSkillTrigger,
-  type SkillAnswers,
-} from "@/lib/skill-pipeline";
 import { searchSkills } from "@/lib/skill-registry";
 
 export const runtime = "nodejs";
@@ -19,6 +10,13 @@ function textResult(payload: unknown, isError = false) {
     content: [{ type: "text" as const, text: JSON.stringify(payload) }],
     ...(isError ? { isError: true } : {}),
   };
+}
+
+const DEMO_DISABLED_MSG =
+  "MCP LLM tools are disabled on this public demo because the server has no Anthropic API key (it's a web demo). To use Skillsmith over MCP, self-host the project.";
+
+function demoDisabled() {
+  return textResult({ error: DEMO_DISABLED_MSG }, true);
 }
 
 const answersSchema = {
@@ -90,18 +88,7 @@ const handler = createMcpHandler(
             .describe("Any earlier interview answers for context"),
         },
       },
-      async ({ field, draft, prior_answers }) => {
-        try {
-          const value = await polishSkillField({
-            field,
-            draft,
-            priorAnswers: prior_answers,
-          });
-          return textResult({ value });
-        } catch (e: any) {
-          return textResult({ error: e?.message ?? String(e) }, true);
-        }
-      }
+      async () => demoDisabled()
     );
 
     server.registerTool(
@@ -116,18 +103,7 @@ const handler = createMcpHandler(
           trigger: z.string().optional().describe("When the skill should trigger"),
         },
       },
-      async ({ name, purpose, trigger }) => {
-        try {
-          const result = await researchSkill({ name, purpose, trigger });
-          return textResult({
-            registry_hits: result.registryHits,
-            research_notes: result.researchNotes,
-            research_sources: result.sources,
-          });
-        } catch (e: any) {
-          return textResult({ error: e?.message ?? String(e) }, true);
-        }
-      }
+      async () => demoDisabled()
     );
 
     server.registerTool(
@@ -146,17 +122,7 @@ const handler = createMcpHandler(
             .describe("Structured research notes from the research stage"),
         },
       },
-      async ({ answers, research_notes }) => {
-        try {
-          const skill_md = await synthesizeSkill({
-            answers: answers as SkillAnswers,
-            researchNotes: research_notes,
-          });
-          return textResult({ skill_md });
-        } catch (e: any) {
-          return textResult({ error: e?.message ?? String(e) }, true);
-        }
-      }
+      async () => demoDisabled()
     );
 
     server.registerTool(
@@ -173,19 +139,7 @@ const handler = createMcpHandler(
             .describe("User request phrasings the current description failed to trigger on"),
         },
       },
-      async ({ skill_md, failed_cases }) => {
-        try {
-          const optimized = await optimizeSkillDescription({
-            skillMd: skill_md,
-            failedCases: failed_cases,
-          });
-          return textResult({
-            ...optimized,
-          });
-        } catch (e: any) {
-          return textResult({ error: e?.message ?? String(e) }, true);
-        }
-      }
+      async () => demoDisabled()
     );
 
     server.registerTool(
@@ -203,18 +157,7 @@ const handler = createMcpHandler(
           description: z.string().optional().describe("Description override"),
         },
       },
-      async ({ skill_md, name, description }) => {
-        try {
-          const result = await testSkillTrigger({
-            skillMd: skill_md,
-            name,
-            description,
-          });
-          return textResult(result);
-        } catch (e: any) {
-          return textResult({ error: e?.message ?? String(e) }, true);
-        }
-      }
+      async () => demoDisabled()
     );
 
     server.registerTool(
@@ -229,27 +172,7 @@ const handler = createMcpHandler(
             .describe("Interview answers for name, purpose, trigger, steps, gotchas, and example"),
         },
       },
-      async ({ answers }) => {
-        try {
-          const result = await runSkillPipeline({
-            answers: answers as SkillAnswers,
-          });
-          return textResult({
-            registry_hits: result.registryHits,
-            research_notes: result.researchNotes,
-            research_sources: result.researchSources,
-            research_error: result.researchError,
-            skill_md: result.skillMd,
-            optimized_description: result.optimizedDescription,
-            optimize_error: result.optimizeError,
-            trigger_tests: result.triggerTests,
-            trigger_test_error: result.triggerTestError,
-            final_skill_md: result.finalSkillMd,
-          });
-        } catch (e: any) {
-          return textResult({ error: e?.message ?? String(e) }, true);
-        }
-      }
+      async () => demoDisabled()
     );
   },
   {},
