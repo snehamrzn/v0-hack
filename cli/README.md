@@ -7,7 +7,7 @@ One-line installer for skills authored in [Skillsmith](https://github.com/sneham
 Copy the **npx command** from the Skillsmith install panel and paste it into your terminal:
 
 ```
-npx -y @snehamrzn/skillsmith-install@latest abc12def
+npx -y @snehamrzzn/skillsmith-install@latest abc12def
 ```
 
 That's it. The CLI fetches the skill by its short ID, computes the right install path for the chosen target, and writes the file.

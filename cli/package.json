@@ -1,10 +1,10 @@
 {
-  "name": "@snehamrzn/skillsmith-install",
+  "name": "@snehamrzzn/skillsmith-install",
   "version": "0.4.0",
   "description": "One-line installer for Skillsmith-authored agent skills (Claude / Cursor / generic). Fetches a shared skill by its short ID and writes the SKILL.md to the right place.",
   "type": "module",
   "bin": {
-    "skillsmith-install": "./bin/skillsmith.mjs"
+    "skillsmith-install": "bin/skillsmith.mjs"
   },
   "files": [
     "bin",
@@ -24,7 +24,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/snehamrzn/v0-hack.git",
+    "url": "git+https://github.com/snehamrzn/v0-hack.git",
     "directory": "cli"
   },
   "author": "snehamrzn"

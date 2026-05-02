@@ -146,7 +146,7 @@ export async function shareSkill(
 // the right place.
 const PROD_SERVER = "https://v0-hack-phi-orcin.vercel.app";
 export function buildNpxCommand(id: string, origin?: string): string {
-  const base = `npx -y @snehamrzn/skillsmith-install@latest ${id}`;
+  const base = `npx -y @snehamrzzn/skillsmith-install@latest ${id}`;
   if (!origin || origin === PROD_SERVER) return base;
   return `${base} --server=${origin}`;
 }
