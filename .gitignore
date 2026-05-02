@@ -7,3 +7,7 @@ dist
 !.env.example
 .vite
 .vercel
+
+# Next.js
+.next
+next-env.d.ts
