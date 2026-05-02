@@ -7,7 +7,7 @@ One-line installer for skills authored in [Skillsmith](https://github.com/sneham
 Copy the **npx command** from the Skillsmith install panel and paste it into your terminal:
 
 ```
-npx -y skillsmith-install@latest abc12def
+npx -y @snehamrzn/skillsmith-install@latest abc12def
 ```
 
 That's it. The CLI fetches the skill by its short ID, computes the right install path for the chosen target, and writes the file.
@@ -24,7 +24,7 @@ That's it. The CLI fetches the skill by its short ID, computes the right install
 ### Flags
 
 - `--force` — overwrite an existing file at the install path. Without it, the CLI refuses and exits non-zero.
-- `--server=<url>` — fetch from a non-default Skillsmith deployment. Useful for self-hosted forks or local dev. Default: `https://skillsmith.vercel.app`. Also reads `SKILLSMITH_SERVER` env var.
+- `--server=<url>` — fetch from a non-default Skillsmith deployment. Useful for self-hosted forks or local dev. Default: `https://v0-hack-phi-orcin.vercel.app`. Also reads `SKILLSMITH_SERVER` env var.
 - `--help` — print usage.
 
 ## Why this exists

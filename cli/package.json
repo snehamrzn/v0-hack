@@ -1,6 +1,6 @@
 {
-  "name": "skillsmith-install",
-  "version": "0.3.0",
+  "name": "@snehamrzn/skillsmith-install",
+  "version": "0.4.0",
   "description": "One-line installer for Skillsmith-authored agent skills (Claude / Cursor / generic). Fetches a shared skill by its short ID and writes the SKILL.md to the right place.",
   "type": "module",
   "bin": {

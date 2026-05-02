@@ -11,13 +11,13 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-const DEFAULT_SERVER = "https://skillsmith.vercel.app";
+const DEFAULT_SERVER = "https://v0-hack-phi-orcin.vercel.app";
 
 const HELP = `skillsmith-install — install a Skillsmith-authored agent skill.
 
 usage:
-  npx -y skillsmith-install@latest <id> [--force] [--server=<url>]
-  npx -y skillsmith-install@latest --help
+  npx -y @snehamrzn/skillsmith-install@latest <id> [--force] [--server=<url>]
+  npx -y @snehamrzn/skillsmith-install@latest --help
 
   <id>          short ID copied from the Skillsmith install panel
   --force       overwrite an existing file at the install path
@@ -89,7 +89,7 @@ const { v, target, scope, slug, content } = payload || {};
 if (v !== 1) {
   die(
     `unsupported payload version: ${v} (expected 1) — update with ` +
-    `'npm install -g skillsmith-install@latest'`,
+    `'npm install -g @snehamrzn/skillsmith-install@latest'`,
   );
 }
 if (!target || !slug || typeof content !== "string") {

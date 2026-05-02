@@ -1443,7 +1443,7 @@ function DoneCard({
         <div className="install-cli" aria-label="install via terminal">
           <p className="cli-hint">{terminalHint(target, effectiveScope)}</p>
           <pre className="cli-block">
-            {installCommand || `npx -y skillsmith-install@latest <click copy to generate>`}
+            {installCommand || `npx -y @snehamrzn/skillsmith-install@latest <click copy to generate>`}
           </pre>
           <button
             type="button"

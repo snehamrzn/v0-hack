@@ -98,20 +98,20 @@ Each stage has a **ref-guard** (`researchFiredRef`, `synthFiredRef`, etc.) so Re
 `buildArtifacts(skillMd, slug, target, scope)` returns the `{path, content}` entries plus a friendly path hint. Two surfaces consume this:
 
 - Browser save (`components/save-handlers.ts`): File System Access API (Chromium) or JSZip download (Safari/Firefox).
-- Sharable installer: the user clicks "share", `components/skill-formats.ts#shareSkill` POSTs the **already-formatted artifact** (cursor users get `.mdc`-ified content stored, not raw SKILL.md) to `/api/share`, which writes a JSON record `{v: 1, target, scope, slug, content}` to Upstash with a 90-day TTL and returns a short id. The user copies `npx -y skillsmith-install@latest <id>` and runs it; `cli/bin/skillsmith.mjs` fetches via `/api/skill?id=…` and writes to disk.
+- Sharable installer: the user clicks "share", `components/skill-formats.ts#shareSkill` POSTs the **already-formatted artifact** (cursor users get `.mdc`-ified content stored, not raw SKILL.md) to `/api/share`, which writes a JSON record `{v: 1, target, scope, slug, content}` to Upstash with a 90-day TTL and returns a short id. The user copies `npx -y @snehamrzn/skillsmith-install@latest <id>` and runs it; `cli/bin/skillsmith.mjs` fetches via `/api/skill?id=…` and writes to disk.
 
 **Path computation in `cli/bin/skillsmith.mjs` mirrors `buildArtifacts` in `components/skill-formats.ts`.** They share a record format but no code. If you change one, change the other (the CLI shipping comment calls this out explicitly).
 
 ### CLI surface — public contracts
 
-The `cli/` directory ships an **unrelated npm package** (`skillsmith-install`) and is not built or run by `npm run dev`/`npm run build`. The CLI fetches skill records over HTTP, so the following endpoints are **public contracts** that must not change shape:
+The `cli/` directory ships an **unrelated npm package** (`@snehamrzn/skillsmith-install`) and is not built or run by `npm run dev`/`npm run build`. The CLI fetches skill records over HTTP, so the following endpoints are **public contracts** that must not change shape:
 
 1. **`POST /api/chat`** — accepts `{messages: [{role, content}]}` with mode markers (`POLISH_FIELD`, `SYNTHESIZE_SKILL_MD`, `RESEARCH_TOPIC`, `OPTIMIZE_DESCRIPTION`, `TEST_TRIGGER`, `SEARCH_REGISTRY`). Streams responses for non-search modes; returns plain JSON (`{"hits": [...]}`) for `SEARCH_REGISTRY`.
 2. **`POST /api/share`** — accepts `{content: string}` (a JSON-stringified skill record), returns `{id: string}`.
 3. **`GET /api/skill?id=<id>`** — returns the raw stored content (a JSON string, no envelope). **The CLI ships independently and pinning to a stable URL/format is critical** — same path, same query param, same response body shape.
 4. **`/api/mcp/mcp` and `/api/mcp/sse`** — MCP transport endpoints registered by `createMcpHandler` with `basePath: "/api/mcp"`. External MCP clients connect here. The list of registered tools and their schemas must be byte-identical (`search_skills`, `polish_skill_field`, `research_skill`, `synthesize_skill`, `optimize_skill_description`, `test_skill_trigger`, `run_skill_pipeline`).
 
-There is also a **pre-existing CLI URL mismatch** flagged in the migration plan: `cli/bin/skillsmith.mjs#DEFAULT_SERVER` and `components/skill-formats.ts#PROD_SERVER` both point at `https://skillsmith.vercel.app`, but that alias is not currently attached to this Vercel project. The hosted webpage works fine; `npx -y skillsmith-install <id>` will fetch from the wrong server until either the alias is claimed or both constants are pointed at the live alias and `skillsmith-install` is republished. Don't fix this without the user's say-so — it's a release decision, not a code one.
+`cli/bin/skillsmith.mjs#DEFAULT_SERVER` and `components/skill-formats.ts#PROD_SERVER` both point at `https://v0-hack-phi-orcin.vercel.app` (the live Vercel alias for this project). If the deployment URL ever changes, both constants must move together and the CLI must be re-published — they're a single shipped contract.
 
 ### Function configuration
 
