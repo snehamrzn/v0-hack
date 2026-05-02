@@ -4,7 +4,6 @@ import {
   buildArtifacts,
   buildNpxCommand,
   describeTarget,
-  MCP_ENDPOINT,
   reloadHint,
   replaceDescription,
   shareSkill,
@@ -844,7 +843,6 @@ ${draft}`;
         </div>
         <nav className="topnav">
           <a href="#how">how it works</a>
-          <a href="#connect">connect to your agent</a>
           <a href="#about">about skills</a>
           {apiKey && (
             <button
@@ -948,7 +946,6 @@ ${draft}`;
       )}
 
       {!started && <HowItWorks />}
-      {!started && <ConnectMcp />}
       {!started && <Footer />}
     </div>
   );
@@ -1894,225 +1891,6 @@ function RenderedMd({ md }) {
         return <span key={i}>{line}{"\n"}</span>;
       })}
     </>
-  );
-}
-
-// ----- Connect MCP section -----
-type McpProvider = {
-  id: string;
-  label: string;
-  blurb: string;
-  where: string;
-  snippet: string;
-  copyLabel: string;
-  after: string;
-  language: "json" | "shell" | "url";
-};
-
-const MCP_PROVIDERS: McpProvider[] = [
-  {
-    id: "claude-desktop",
-    label: "Claude Desktop",
-    blurb: "Anthropic's desktop app",
-    where: "In Claude Desktop, open Settings → Developer → Edit Config, then paste this inside the file.",
-    copyLabel: "Copy config",
-    snippet: `{
-  "mcpServers": {
-    "skillsmith": {
-      "command": "npx",
-      "args": ["-y", "mcp-remote", "${MCP_ENDPOINT}"]
-    }
-  }
-}`,
-    after: "Save the file, fully quit Claude Desktop, then reopen it. Ask Claude to “make a SKILL.md for X” and it'll reach for Skillsmith on its own.",
-    language: "json",
-  },
-  {
-    id: "claude-code",
-    label: "Claude Code",
-    blurb: "Anthropic's terminal agent",
-    where: "Run this in any terminal — the Claude Code CLI registers Skillsmith for you.",
-    copyLabel: "Copy command",
-    snippet: `claude mcp add --transport http skillsmith ${MCP_ENDPOINT}`,
-    after: "Open a Claude Code session, type /mcp to confirm Skillsmith is listed, then ask it to author a skill.",
-    language: "shell",
-  },
-  {
-    id: "cursor",
-    label: "Cursor",
-    blurb: "the AI code editor",
-    where: "Save this as ~/.cursor/mcp.json (global) or <project>/.cursor/mcp.json (one repo only).",
-    copyLabel: "Copy config",
-    snippet: `{
-  "mcpServers": {
-    "skillsmith": {
-      "url": "${MCP_ENDPOINT}"
-    }
-  }
-}`,
-    after: "Reload the Cursor window (Cmd/Ctrl+Shift+P → Reload Window). Skillsmith's tools become callable from chat.",
-    language: "json",
-  },
-  {
-    id: "vscode",
-    label: "VS Code",
-    blurb: "with GitHub Copilot Chat",
-    where: "Save this as .vscode/mcp.json in your workspace (or your user-level mcp.json).",
-    copyLabel: "Copy config",
-    snippet: `{
-  "servers": {
-    "skillsmith": {
-      "type": "http",
-      "url": "${MCP_ENDPOINT}"
-    }
-  }
-}`,
-    after: "Open the Copilot Chat panel, switch to Agent mode, and Skillsmith appears in the tool picker.",
-    language: "json",
-  },
-  {
-    id: "chatgpt",
-    label: "ChatGPT",
-    blurb: "OpenAI's web app",
-    where: "In ChatGPT (Plus / Team / Enterprise), open Settings → Connectors → Add a custom connector → MCP. Paste the URL into the server-URL field.",
-    copyLabel: "Copy URL",
-    snippet: MCP_ENDPOINT,
-    after: "Save the connector, then enable it inside any chat from the tools menu.",
-    language: "url",
-  },
-  {
-    id: "other",
-    label: "Other",
-    blurb: "any MCP-compatible client",
-    where: "Skillsmith speaks streamable HTTP MCP. Point your client at this URL.",
-    copyLabel: "Copy URL",
-    snippet: MCP_ENDPOINT,
-    after: `If your client is stdio-only, wrap it: npx -y mcp-remote ${MCP_ENDPOINT}`,
-    language: "url",
-  },
-];
-
-const MCP_TOOLS_PEEK = [
-  ["search_skills", "look for prior-art SKILL.md files on GitHub"],
-  ["polish_skill_field", "rewrite a single answer in Skillsmith's voice"],
-  ["research_skill", "pull findings, pitfalls, and sources for the topic"],
-  ["synthesize_skill", "produce the full SKILL.md from interview answers"],
-  ["optimize_skill_description", "sharpen the description so the agent fires"],
-  ["test_skill_trigger", "stress-test whether the trigger would catch real asks"],
-  ["run_skill_pipeline", "do all of the above in one call"],
-];
-
-function ConnectMcp() {
-  const [activeId, setActiveId] = useState<string>(MCP_PROVIDERS[0].id);
-  const [copied, setCopied] = useState<"url" | "snippet" | null>(null);
-  const provider = MCP_PROVIDERS.find((p) => p.id === activeId) || MCP_PROVIDERS[0];
-
-  const copy = async (text: string, kind: "url" | "snippet") => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(kind);
-      window.setTimeout(() => setCopied(null), 1800);
-    } catch {
-      // Ignore — older browsers may block clipboard without user gesture context.
-    }
-  };
-
-  return (
-    <section id="connect" className="connect">
-      <div className="connect-head">
-        <span className="eyebrow"><span className="dot" /> for your agent, not just you</span>
-        <h2 className="section-h">
-          Or let your agent <em>author its own skills</em>.
-        </h2>
-        <p className="connect-lede">
-          Skillsmith ships as an MCP server too — the same six-step pipeline, callable from <em>Claude</em>, Cursor,
-          ChatGPT, and any other tool that speaks MCP. Pick yours below, paste once, restart, done.
-        </p>
-      </div>
-
-      <div className="connect-card">
-        <div className="connect-endpoint">
-          <span className="picker-label">URL</span>
-          <code className="endpoint-url">{MCP_ENDPOINT}</code>
-          <button
-            type="button"
-            className="ghost-btn endpoint-copy"
-            onClick={() => copy(MCP_ENDPOINT, "url")}
-          >
-            {copied === "url" ? "copied!" : "copy URL"}
-          </button>
-        </div>
-
-        <div className="picker-row connect-picker-row">
-          <span className="picker-label">Open in</span>
-          <div className="seg seg-providers" role="tablist" aria-label="Pick your agent">
-            {MCP_PROVIDERS.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                role="tab"
-                aria-selected={p.id === activeId}
-                className={`seg-btn ${p.id === activeId ? "is-active" : ""}`}
-                onClick={() => {
-                  setActiveId(p.id);
-                  setCopied(null);
-                }}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="connect-panel" role="tabpanel" aria-label={`Setup for ${provider.label}`}>
-          <div className="connect-panel-head">
-            <span className="connect-panel-title">{provider.label}</span>
-            <span className="connect-panel-blurb">{provider.blurb}</span>
-          </div>
-
-          <div className="connect-panel-step">
-            <span className="connect-step-num">1</span>
-            <p className="connect-step-text">{provider.where}</p>
-          </div>
-
-          <pre className={`cli-block connect-snippet lang-${provider.language}`}>{provider.snippet}</pre>
-
-          <div className="connect-panel-actions">
-            <button
-              type="button"
-              className="primary-btn"
-              onClick={() => copy(provider.snippet, "snippet")}
-            >
-              {copied === "snippet" ? "copied!" : provider.copyLabel}
-            </button>
-          </div>
-
-          <div className="connect-panel-step">
-            <span className="connect-step-num">2</span>
-            <p className="connect-step-text">{provider.after}</p>
-          </div>
-        </div>
-
-        <details className="connect-tools">
-          <summary>What your agent gains: 7 new tools</summary>
-          <ul>
-            {MCP_TOOLS_PEEK.map(([name, desc]) => (
-              <li key={name}>
-                <code>{name}</code>
-                <span className="tool-desc"> — {desc}</span>
-              </li>
-            ))}
-          </ul>
-          <p className="connect-tools-hint">
-            Same prompts, same model, same registry as the webpage above — agents and humans share one source of truth.
-          </p>
-        </details>
-      </div>
-
-      <p className="connect-foot">
-        Don't see your tool? Any MCP-compatible client works — point it at the URL up top.
-      </p>
-    </section>
   );
 }
 
