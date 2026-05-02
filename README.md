@@ -2,7 +2,7 @@
 
 Skillsmith interviews you gives you back a finished `SKILL.md` for your AI agent. Built for the Vercel hackathon, Track 2 (v0 + MCPs). The same pipeline ships two ways: as a Next.js webpage you click through, and as an MCP server other agents can call.
 
-Live: https://v0-hack-phi-orcin.vercel.app
+Live: https://v0-hack-lemon.vercel.app
 
 ## What's a skill?
 
@@ -30,7 +30,7 @@ No account. No login. No quotas you can hit.
 Skillsmith ships its own MCP server next to the webpage, so the exact same pipeline is reachable two ways:
 
 1. Through the website, by a person clicking through the interview.
-2. Through MCP, by an AI agent calling `https://v0-hack-phi-orcin.vercel.app/api/mcp/mcp` directly.
+2. Through MCP, by an AI agent calling `https://v0-hack-lemon.vercel.app/api/mcp/mcp` directly.
 
 Seven tools are exposed:
 
@@ -46,12 +46,12 @@ So a Claude agent can ask Skillsmith to author a skill for itself, no person inv
 
 ## Connect Skillsmith to your agent
 
-The whole point of shipping the pipeline as an MCP server is that your agent can author skills *for itself*, with no clicking through the webpage. The live site has a guided picker at [the connect section](https://v0-hack-phi-orcin.vercel.app/#connect) that copies the right snippet for whichever tool you use. The same instructions, in case you'd rather paste from here:
+The whole point of shipping the pipeline as an MCP server is that your agent can author skills *for itself*, with no clicking through the webpage. The live site has a guided picker at [the connect section](https://v0-hack-lemon.vercel.app/#connect) that copies the right snippet for whichever tool you use. The same instructions, in case you'd rather paste from here:
 
 The endpoint is the same for everyone:
 
 ```
-https://v0-hack-phi-orcin.vercel.app/api/mcp/mcp
+https://v0-hack-lemon.vercel.app/api/mcp/mcp
 ```
 
 ### Claude Desktop
@@ -63,7 +63,7 @@ Open Settings → Developer → Edit Config and paste this inside the file:
   "mcpServers": {
     "skillsmith": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "https://v0-hack-phi-orcin.vercel.app/api/mcp/mcp"]
+      "args": ["-y", "mcp-remote", "https://v0-hack-lemon.vercel.app/api/mcp/mcp"]
     }
   }
 }
@@ -76,7 +76,7 @@ Save, fully quit Claude Desktop (not just close the window), then reopen it. Ask
 One command in any shell:
 
 ```bash
-claude mcp add --transport http skillsmith https://v0-hack-phi-orcin.vercel.app/api/mcp/mcp
+claude mcp add --transport http skillsmith https://v0-hack-lemon.vercel.app/api/mcp/mcp
 ```
 
 Start a session, type `/mcp` to confirm Skillsmith is listed, then ask it to author a skill for you.
@@ -89,7 +89,7 @@ Save this as `~/.cursor/mcp.json` for global use, or `<project>/.cursor/mcp.json
 {
   "mcpServers": {
     "skillsmith": {
-      "url": "https://v0-hack-phi-orcin.vercel.app/api/mcp/mcp"
+      "url": "https://v0-hack-lemon.vercel.app/api/mcp/mcp"
     }
   }
 }
@@ -106,7 +106,7 @@ Save as `.vscode/mcp.json` in your workspace, or in your user-level `mcp.json`:
   "servers": {
     "skillsmith": {
       "type": "http",
-      "url": "https://v0-hack-phi-orcin.vercel.app/api/mcp/mcp"
+      "url": "https://v0-hack-lemon.vercel.app/api/mcp/mcp"
     }
   }
 }
@@ -123,7 +123,7 @@ Plus, Team, and Enterprise plans only. In Settings → Connectors, add a custom 
 Skillsmith speaks streamable HTTP MCP, so any compatible client works. If yours is stdio-only, wrap the URL with `mcp-remote`:
 
 ```bash
-npx -y mcp-remote https://v0-hack-phi-orcin.vercel.app/api/mcp/mcp
+npx -y mcp-remote https://v0-hack-lemon.vercel.app/api/mcp/mcp
 ```
 
 ## Sharing the result
