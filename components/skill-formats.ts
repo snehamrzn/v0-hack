@@ -144,7 +144,8 @@ export async function shareSkill(
 // the production server URL; if the web app is running on a different origin
 // (dev / staging / a fork's deploy), append --server so the CLI fetches from
 // the right place.
-const PROD_SERVER = "https://v0-hack-phi-orcin.vercel.app";
+export const PROD_SERVER = "https://v0-hack-phi-orcin.vercel.app";
+export const MCP_ENDPOINT = `${PROD_SERVER}/api/mcp/mcp`;
 export function buildNpxCommand(id: string, origin?: string): string {
   const base = `npx -y @snehamrzzn/skillsmith-install@latest ${id}`;
   if (!origin || origin === PROD_SERVER) return base;

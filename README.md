@@ -1,91 +1,197 @@
 # Skillsmith
 
-A web interview that writes a `SKILL.md` for your AI agent so you don't have to stare at a blank file.
+Skillsmith interviews you gives you back a finished `SKILL.md` for your AI agent. Built for the Vercel hackathon, Track 2 (v0 + MCPs). The same pipeline ships two ways: as a Next.js webpage you click through, and as an MCP server other agents can call.
 
-## What this is
+Live: https://v0-hack-phi-orcin.vercel.app
 
-Agents work better when you hand them a short instruction card that tells them what the task is, when to reach for it, and what to avoid. That card is a skill. Anthropic's format wants a `SKILL.md` with YAML frontmatter and a couple of sections; Cursor wants the same shape under a different extension.
+## What's a skill?
 
-Skillsmith asks you six questions, runs your answers through Claude, and hands you back the finished file. You can save it directly into `~/.claude/skills/`, drop it into a project, or download a zip.
+If you use Claude, Cursor, or another AI agent, you've probably wanted to teach it a specific habit. "When I paste meeting notes, write the standup post in our team's voice." "When I say 'rescue this recipe,' swap in the ingredients I actually have."
 
-## The interview
+Agents already support this. The format is a `SKILL.md` file with a few sections: a name, a description telling the agent when to fire, the steps to follow, the stuff to avoid. Drop the file in the right folder and the agent picks it up automatically.
 
-Six prompts, in order:
+Writing a good one is the part nobody enjoys. The description has to be specific enough that the agent triggers on the right requests, but not so broad that it fires on everything. The steps need to be concrete. The "gotchas" section is where most of the real value lives, and it's the section people skip first.
 
-1. `name` — short, memorable, hyphenated
-2. `purpose` — one sentence on what the skill does
-3. `trigger` — when the agent should reach for it (specific phrases help)
-4. `steps` — what the agent should actually do
-5. `gotchas` — what it tends to get wrong (optional, but usually the most useful field)
-6. `example` — input then output, if you have one (optional)
+Skillsmith is the six-question conversation that gets you to a finished file. Polish each answer if you want, then Claude does the heavy lifting.
 
-Each field has a "polish with skillsmith" button that rewrites your draft in the right voice for that field. The polish stays on-topic — it won't invent details you didn't supply.
+## Try it
 
-## What happens after the last question
+What happens when you click start:
 
-First, a find-or-build check. Skillsmith searches public `SKILL.md` files on GitHub for prior art. If a public skill already covers your topic, you can install it in one click instead of authoring a new one — the file is fetched from GitHub raw and dropped into the standard save flow. If nothing matches (or you click "write fresh"), the four-stage pipeline kicks in:
+1. Walk through six questions: name, purpose, trigger, steps, gotchas, example.
+2. Skillsmith searches GitHub for a public `SKILL.md` that already covers your topic. If one fits, install it in one click and skip everything else.
+3. If you're writing fresh, the four-stage pipeline runs in the right panel: research, synthesize, sharpen the description, stress-test the trigger.
+4. When the preview looks right, save to disk, grab a zip, or copy a one-line `npx` command you can send to someone else.
 
-1. Research. Skillsmith pulls related prior-art skills, then Claude runs 2 to 4 web searches on the skill's domain so the synthesis can ground itself in real practice instead of guessing. Sources show up in the right-hand panel.
-2. Synthesize. Your answers plus the research notes go in, a complete `SKILL.md` comes out and streams into the preview.
-3. Sharpen the description. The frontmatter `description:` line gets rewritten to be more aggressive about triggering. Agents under-trigger on vague descriptions, so this stage names concrete phrases the user might say.
-4. Stress-test the trigger. Claude generates fake user requests and checks whether the description would fire on the right ones and stay quiet on the rest. If something fails, you can rerun stage 3 with the failures fed back in.
+No account. No login. No quotas you can hit.
 
-If `ANTHROPIC_API_KEY` isn't set, you still get a template-built `SKILL.md` from your raw answers. The model stages just skip.
+## MCP server
 
-## Saving
+Skillsmith ships its own MCP server next to the webpage, so the exact same pipeline is reachable two ways:
 
-Three targets:
+1. Through the website, by a person clicking through the interview.
+2. Through MCP, by an AI agent calling `https://v0-hack-phi-orcin.vercel.app/api/mcp/mcp` directly.
 
-- claude: `~/.claude/skills/<name>/SKILL.md` for global, or `<project>/.claude/skills/<name>/SKILL.md` for project scope
-- cursor: `.cursor/rules/<name>.mdc` with the cursor frontmatter shape
-- generic: a plain `SKILL.md` in a folder of your choice
+Seven tools are exposed:
 
-If your browser supports the File System Access API (Chrome, Edge, the Chromium ones), the file writes straight to disk after you pick a folder. Safari and Firefox fall back to a zip download.
+- `search_skills` — find existing public `SKILL.md` files on GitHub.
+- `polish_skill_field` — rewrite a single interview answer in Skillsmith's voice.
+- `research_skill` — run the research stage and return findings, pitfalls, and sources.
+- `synthesize_skill` — turn interview answers into a complete `SKILL.md`.
+- `optimize_skill_description` — sharpen the description so the agent fires on the right asks.
+- `test_skill_trigger` — generate fake user requests and check whether the description would catch them.
+- `run_skill_pipeline` — run research, synthesize, optimize, and test in one shot.
 
-## Setup
+So a Claude agent can ask Skillsmith to author a skill for itself, no person involved. The webpage and the MCP server share the same prompt files (`lib/skill-prompts.ts`, `lib/skill-creator-prompt.ts`), the same model (`claude-sonnet-4-5`), and the same registry — webpage and agent get byte-identical output.
+
+## Connect Skillsmith to your agent
+
+The whole point of shipping the pipeline as an MCP server is that your agent can author skills *for itself*, with no clicking through the webpage. The live site has a guided picker at [the connect section](https://v0-hack-phi-orcin.vercel.app/#connect) that copies the right snippet for whichever tool you use. The same instructions, in case you'd rather paste from here:
+
+The endpoint is the same for everyone:
+
+```
+https://v0-hack-phi-orcin.vercel.app/api/mcp/mcp
+```
+
+### Claude Desktop
+
+Open Settings → Developer → Edit Config and paste this inside the file:
+
+```json
+{
+  "mcpServers": {
+    "skillsmith": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://v0-hack-phi-orcin.vercel.app/api/mcp/mcp"]
+    }
+  }
+}
+```
+
+Save, fully quit Claude Desktop (not just close the window), then reopen it. Ask Claude to "make a SKILL.md for X" and it'll reach for Skillsmith on its own.
+
+### Claude Code
+
+One command in any shell:
+
+```bash
+claude mcp add --transport http skillsmith https://v0-hack-phi-orcin.vercel.app/api/mcp/mcp
+```
+
+Start a session, type `/mcp` to confirm Skillsmith is listed, then ask it to author a skill for you.
+
+### Cursor
+
+Save this as `~/.cursor/mcp.json` for global use, or `<project>/.cursor/mcp.json` for one repo only:
+
+```json
+{
+  "mcpServers": {
+    "skillsmith": {
+      "url": "https://v0-hack-phi-orcin.vercel.app/api/mcp/mcp"
+    }
+  }
+}
+```
+
+Reload the Cursor window (Cmd/Ctrl+Shift+P → Reload Window) and Skillsmith's tools become callable from chat.
+
+### VS Code (with Copilot Chat)
+
+Save as `.vscode/mcp.json` in your workspace, or in your user-level `mcp.json`:
+
+```json
+{
+  "servers": {
+    "skillsmith": {
+      "type": "http",
+      "url": "https://v0-hack-phi-orcin.vercel.app/api/mcp/mcp"
+    }
+  }
+}
+```
+
+Open the Copilot Chat panel, switch to Agent mode, and Skillsmith shows up in the tool picker.
+
+### ChatGPT
+
+Plus, Team, and Enterprise plans only. In Settings → Connectors, add a custom connector, choose MCP, and paste the URL into the server-URL field. Save, then enable it inside any chat from the tools menu.
+
+### Other clients
+
+Skillsmith speaks streamable HTTP MCP, so any compatible client works. If yours is stdio-only, wrap the URL with `mcp-remote`:
+
+```bash
+npx -y mcp-remote https://v0-hack-phi-orcin.vercel.app/api/mcp/mcp
+```
+
+## Sharing the result
+
+When your skill looks right, you can copy a one-line install command:
+
+```
+npx -y @snehamrzzn/skillsmith-install@latest <id>
+```
+
+The `<id>` is a short code Skillsmith gives you. Send it to a friend. They paste, the file lands in the right spot on their machine, they're done. The id is good for 90 days.
+
+## Where the file goes
+
+Four target shapes, picked from a dropdown before you save:
+
+- Claude global → `~/.claude/skills/<name>/SKILL.md` (loaded for every Claude chat).
+- Claude project → `<project-root>/.claude/skills/<name>/SKILL.md` (only loaded in that project).
+- Cursor → `.cursor/rules/<name>.mdc` (with the cursor frontmatter shape).
+- Generic → a plain `.md` file you can put wherever.
+
+Chrome and Edge can write the file straight to a folder you pick. Safari and Firefox don't support that browser API yet, so they fall back to a zip download.
+
+## Running it locally
 
 ```bash
 npm install
 cp .env.example .env.local
-# put your ANTHROPIC_API_KEY in .env.local
-# (optional) GITHUB_TOKEN for higher rate limits on the registry MCP
+# add ANTHROPIC_API_KEY (required for the LLM stages)
+# optional: GITHUB_TOKEN for higher rate limits on the registry search
 npm run dev
 ```
 
-Both keys are read server-side. They never reach the browser.
+Then open http://localhost:3000.
+
+If `ANTHROPIC_API_KEY` isn't set, the interview still works. You just get a mechanically-built `SKILL.md` from your raw answers; the model stages skip themselves.
 
 ## Stack
 
-- React 18 and Vite
-- Vercel AI SDK with the Anthropic provider
-- `mcp-handler` + `zod` for the in-repo Skillsmith MCP server
-- JSZip for the fallback download
-
-## Layout
+- Next.js 14 (App Router). Migrated from Vite mid-hackathon when serverless cold-start hangs were burning the chat route.
+- Vercel AI SDK with the Anthropic provider, for streaming Claude responses.
+- `mcp-handler` and `zod` for the MCP server.
+- Upstash Redis for the 90-day share-link storage (in-memory fallback in dev).
+- JSZip for the Safari/Firefox download fallback.
 
 ```
-api/chat.ts                   serverless endpoint, wires the system prompt to streamText
-api/skill-creator-prompt.ts   the prompt itself, with mode markers
-api/mcp/[transport].ts        Skillsmith MCP server — exposes search plus the full skill pipeline
-api/skill-pipeline.ts         shared prompts + non-UI pipeline helpers for chat and MCP
-src/App.tsx                   UI + find-or-build + the four-stage pipeline
-src/skill-formats.ts          turns one SKILL.md into per-target files
-src/save-handlers.ts          File System Access API and the zip fallback
-src/skill-creator-system.md   reference copy of the prompt
+app/
+  page.tsx                      interview UI shell
+  api/
+    chat/route.ts               LLM dispatch; pipeline stages stream from here
+    share/route.ts              POST a skill, get a short id back
+    skill/route.ts              GET a shared skill by id (the npx CLI calls this)
+    mcp/[transport]/route.ts    the MCP server
+components/
+  App.tsx                       interview UI, preview, save flow
+  skill-formats.ts              one SKILL.md → per-target files
+  save-handlers.ts              File System Access API and the zip fallback
+lib/
+  skill-pipeline.ts             non-streaming versions of each stage (used by the MCP)
+  skill-prompts.ts              system prompts shared by chat and MCP
+  skill-registry.ts             GitHub search wrapper, 5-min cache
+  storage.ts                    Redis-backed share store, in-memory fallback
+cli/
+  bin/skillsmith.mjs            the published npx installer
 ```
 
-The pipeline lives in `App.tsx` as five `useEffect` blocks chained on state nullability. Stage 0 (registry search) gates everything below it on `userChoice`; the install path skips stages 1–4 entirely. Each one has a ref guard so React strict-mode double-invokes can't double-fire.
+The pipeline lives in `App.tsx` as five chained `useEffect` blocks, each gated on the previous stage's output. The MCP path skips the React state machine entirely and calls `lib/skill-pipeline.ts` directly, so external agents get the same behavior without paying for the streaming UX.
 
-## The MCP server
+## Credits
 
-`api/mcp/[transport].ts` is a standalone MCP server other agents can install. Connect any MCP-capable client to `https://<your-deployment>/api/mcp/mcp` (HTTP transport) and you'll get the same major stages the webpage uses:
-
-- `search_skills` — find existing public `SKILL.md` files on GitHub
-- `polish_skill_field` — rewrite one interview field in Skillsmith's house style
-- `research_skill` — run the research stage and return findings/pitfalls/sources
-- `synthesize_skill` — turn interview answers into a complete `SKILL.md`
-- `optimize_skill_description` — sharpen the frontmatter `description:` line
-- `test_skill_trigger` — generate positive/negative trigger tests
-- `run_skill_pipeline` — run research → synthesize → optimize → test end to end
-
-The webpage still uses `src/App.tsx` + `/api/chat` for its own streaming UX, but the MCP surface now mirrors that pipeline for external clients.
+Built for the Vercel Agents hackathon. The four-stage pipeline pattern is borrowed from Anthropic's own skill-creator framework. The `cli/` package was the very last piece to ship; it sat as committed-but-unpublished source for two days before going live as `@snehamrzzn/skillsmith-install`.
